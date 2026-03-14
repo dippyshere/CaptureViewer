@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iomanip>
+#include <limits>
 #include <sstream>
 #include <string_view>
 
@@ -161,12 +162,10 @@ void OverlayUI::hideMenu(Application& app)
     {
         return;
     }
-    if (!menuVisible_)
-    {
-        return;
-    }
+
     menuVisible_ = false;
     drawDataValid_ = false;
+    app.inputCaptureManager_.setOverlayPassthrough(false);
     PostMessage(hwnd_, WM_INPUT_CAPTURE_UPDATE_CLIP, 1, 0);
     ImGui::GetIO().MouseDrawCursor = false;
     app.requestImmediateRender();
@@ -180,6 +179,10 @@ void OverlayUI::showMenu(Application& app)
     }
     menuVisible_ = true;
     refreshDeviceLists(app);
+    bridgeBaudRateDraft_ = app.settings().serialBaudRate == 0
+        ? AppDefaults::kDefaultSerialBaudRate
+        : app.settings().serialBaudRate;
+    app.inputCaptureManager_.setOverlayPassthrough(true);
     PostMessage(hwnd_, WM_INPUT_CAPTURE_UPDATE_CLIP, 0, 0);
     ImGui::GetIO().MouseDrawCursor = true;
     app.requestImmediateRender();
@@ -341,6 +344,27 @@ void OverlayUI::drawMenuWindow(Application& app)
         }
         ImGui::EndChild();
     }
+
+    ImGui::SetNextItemWidth(170.0f);
+    int bridgeBaudInput = static_cast<int>(std::min<unsigned int>(
+        bridgeBaudRateDraft_,
+        static_cast<unsigned int>(std::numeric_limits<int>::max())));
+    if (ImGui::InputInt("Baud Rate", &bridgeBaudInput, 115200, 1000000, ImGuiInputTextFlags_CharsDecimal))
+    {
+        bridgeBaudRateDraft_ = static_cast<unsigned int>(std::clamp(bridgeBaudInput, 1, std::numeric_limits<int>::max()));
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Apply Baud"))
+    {
+        app.setSerialBaudRate(bridgeBaudRateDraft_);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Use Default"))
+    {
+        bridgeBaudRateDraft_ = AppDefaults::kDefaultSerialBaudRate;
+        app.setSerialBaudRate(bridgeBaudRateDraft_);
+    }
+    ImGui::TextDisabled("Configured baud persists and is not replaced by bridge auto-detection.");
 
     ImGui::Spacing();
 

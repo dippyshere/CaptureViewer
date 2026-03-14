@@ -30,7 +30,6 @@ namespace
 
     constexpr UINT_PTR kTimerRenderDuringInteraction = 0x7101;
     const std::string kAudioSourceVideoSentinel = "@video";
-    constexpr unsigned int kSerialBaudRateDefault = 6000000;
 
     std::wstring utf8ToWide(const std::string& text)
     {
@@ -576,7 +575,7 @@ void Application::loadPersistentSettings()
     }
     if (settings_.serialBaudRate == 0)
     {
-        settings_.serialBaudRate = kSerialBaudRateDefault;
+        settings_.serialBaudRate = AppDefaults::kDefaultSerialBaudRate;
     }
     if (settings_.audioPlaybackEnabled && settings_.audioDeviceMoniker.empty())
     {
@@ -774,7 +773,7 @@ void Application::applySerialTargetSetting()
     {
         serialStreamer_.start();
     }
-    const unsigned int baud = settings_.serialBaudRate == 0 ? kSerialBaudRateDefault : settings_.serialBaudRate;
+    const unsigned int baud = settings_.serialBaudRate == 0 ? AppDefaults::kDefaultSerialBaudRate : settings_.serialBaudRate;
     serialStreamer_.setBaudRate(baud);
     const std::wstring preferred = utf8ToWide(settings_.inputTargetDevice);
     serialStreamer_.setPreferredPort(preferred);
@@ -822,6 +821,26 @@ void Application::setInputCaptureEnabled(bool enabled)
     savePersistentSettings();
     logApp(std::string("[App] Input capture toggled -> ") + (settings_.inputCaptureEnabled ? "enabled" : "disabled"));
     applyInputCaptureSetting();
+}
+
+void Application::setSerialBaudRate(unsigned int baudRate)
+{
+    if (baudRate == 0)
+    {
+        baudRate = AppDefaults::kDefaultSerialBaudRate;
+    }
+
+    if (settings_.serialBaudRate == baudRate)
+    {
+        return;
+    }
+
+    settings_.serialBaudRate = baudRate;
+    savePersistentSettings();
+    logApp(std::string("[App] Serial baud rate -> ") + std::to_string(settings_.serialBaudRate));
+
+    serialStreamer_.setBaudRate(settings_.serialBaudRate);
+    serialStreamer_.requestReconnect();
 }
 
 void Application::selectVideoDevice(const std::string& moniker)
@@ -1034,29 +1053,28 @@ void Application::renderFrame(bool forcePresent)
 
 void Application::selectBridgeDevice(const SerialPortInfo& info, bool autoSelect)
 {
-    unsigned int suggestedBaud = settings_.serialBaudRate == 0 ? kSerialBaudRateDefault : settings_.serialBaudRate;
-    if (!classifyBridgeDevice(info, &suggestedBaud))
-    {
-        if (suggestedBaud == 0)
-        {
-            suggestedBaud = kSerialBaudRateDefault;
-        }
-    }
+    unsigned int suggestedBaud = AppDefaults::kDefaultSerialBaudRate;
+    classifyBridgeDevice(info, &suggestedBaud);
 
+    const bool hasConfiguredBaud = settings_.serialBaudRate != 0;
+    const unsigned int baudRate = hasConfiguredBaud ? settings_.serialBaudRate : suggestedBaud;
     const bool deviceChanged = settings_.inputTargetDevice != info.portName;
-    const bool baudChanged = settings_.serialBaudRate != suggestedBaud;
+    const bool baudChanged = !hasConfiguredBaud;
     if (!deviceChanged && !baudChanged && autoSelect)
     {
         return;
     }
 
     settings_.inputTargetDevice = info.portName;
-    settings_.serialBaudRate = suggestedBaud;
+    if (!hasConfiguredBaud)
+    {
+        settings_.serialBaudRate = baudRate;
+    }
     savePersistentSettings();
 
-    logApp(std::string("[App] Bridge device -> ") + info.portName + " (baud " + std::to_string(suggestedBaud) + ")");
+    logApp(std::string("[App] Bridge device -> ") + info.portName + " (baud " + std::to_string(baudRate) + ")");
 
-    serialStreamer_.setBaudRate(suggestedBaud);
+    serialStreamer_.setBaudRate(baudRate);
 
     std::wstring preferred = utf8ToWide(info.portName);
     serialStreamer_.setPreferredPort(preferred);
@@ -1065,8 +1083,8 @@ void Application::selectBridgeDevice(const SerialPortInfo& info, bool autoSelect
 
 bool Application::classifyBridgeDevice(const SerialPortInfo& info, unsigned int* outBaud) const
 {
-    constexpr unsigned int kBaudEsp = kSerialBaudRateDefault;
-    constexpr unsigned int kBaudAlt = kSerialBaudRateDefault;
+    constexpr unsigned int kBaudEsp = AppDefaults::kDefaultSerialBaudRate;
+    constexpr unsigned int kBaudAlt = AppDefaults::kDefaultSerialBaudRate;
 
     const std::string friendlyLower = toLowerCopy(info.friendlyName);
     const std::string descLower = toLowerCopy(info.deviceDescription);

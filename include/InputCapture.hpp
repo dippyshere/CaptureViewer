@@ -31,6 +31,7 @@ public:
     void requestCursorUncapture();
     void applyCursorClip(bool enable);
     void clearModifierState();
+    void setOverlayPassthrough(bool enabled);
 
 private:
     static LRESULT CALLBACK keyboardProc(int code, WPARAM wParam, LPARAM lParam);
@@ -70,6 +71,7 @@ private:
     std::atomic<bool> captureBoundsValid_{false};
     std::atomic<HWND> targetWindow_{nullptr};
     std::atomic<bool> menuChordEnabled_{false};
+    std::atomic<bool> overlayPassthrough_{false};
     std::atomic<int> targetWidth_{1920};
     std::atomic<int> targetHeight_{1080};
     std::atomic<bool> relativeCaptureActive_{false};

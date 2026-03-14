@@ -361,6 +361,11 @@ LRESULT CALLBACK InputCaptureManager::keyboardProc(int code, WPARAM wParam, LPAR
 
     if (self && self->enabled_.load(std::memory_order_acquire))
     {
+        if (self->overlayPassthrough_.load(std::memory_order_acquire))
+        {
+            return CallNextHookEx(nullptr, code, wParam, lParam);
+        }
+
         const bool within = self->shouldConsumeKeyboard(*data);
         const UINT vkCode = static_cast<UINT>(data->vkCode);
         const bool chordEnabled = self->menuChordEnabled_.load(std::memory_order_acquire);
@@ -426,6 +431,11 @@ LRESULT CALLBACK InputCaptureManager::mouseProc(int code, WPARAM wParam, LPARAM 
 
     if (self && self->enabled_.load(std::memory_order_acquire))
     {
+        if (self->overlayPassthrough_.load(std::memory_order_acquire))
+        {
+            return CallNextHookEx(nullptr, code, wParam, lParam);
+        }
+
         self->handleMouseEvent(wParam, *data);
 
         if (shouldBlockMouse(*data, wParam))
@@ -806,6 +816,28 @@ void InputCaptureManager::clearModifierState()
             streamer_.publishMouseReport(report);
         }
     }
+}
+
+void InputCaptureManager::setOverlayPassthrough(bool enabled)
+{
+    const bool previous = overlayPassthrough_.exchange(enabled, std::memory_order_acq_rel);
+    if (previous == enabled)
+    {
+        return;
+    }
+
+    if (enabled)
+    {
+        clearModifierState();
+        resetKeyboardState();
+        stopRelativeCapture(false);
+        requestCursorClip(false);
+        hasLastMousePoint_ = false;
+        logInput("[Input] Overlay passthrough enabled");
+        return;
+    }
+
+    logInput("[Input] Overlay passthrough disabled");
 }
 
 void InputCaptureManager::updateMouseButtonState(WPARAM wParam, const MSLLHOOKSTRUCT& data)

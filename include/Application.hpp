@@ -64,6 +64,7 @@ private:
     void setAudioPlaybackEnabled(bool enabled);
     void setMicrophoneCaptureEnabled(bool enabled);
     void setInputCaptureEnabled(bool enabled);
+    void setSerialBaudRate(unsigned int baudRate);
     void selectVideoDevice(const std::string& moniker);
     void selectAudioDevice(const std::string& moniker);
     void selectMicrophoneDevice(const std::string& endpointId);

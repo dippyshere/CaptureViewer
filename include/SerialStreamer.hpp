@@ -1,5 +1,7 @@
 #pragma once
 
+#include "AppDefaults.hpp"
+
 #include <Windows.h>
 
 #include <atomic>
@@ -32,8 +34,6 @@ public:
     [[nodiscard]] bool isRunning() const noexcept { return running_.load(std::memory_order_acquire); }
 
 private:
-    static constexpr unsigned int kDefaultBaudRate = 6000000;
-
     enum class PacketType : std::uint8_t {
         Keyboard = 0x01,
         Mouse = 0x02,
@@ -65,5 +65,5 @@ private:
     HANDLE portHandle_ = INVALID_HANDLE_VALUE;
     std::wstring currentPortName_;
     std::wstring preferredPortName_;
-    unsigned int baudRate_ = kDefaultBaudRate;
+    unsigned int baudRate_ = AppDefaults::kDefaultSerialBaudRate;
 };

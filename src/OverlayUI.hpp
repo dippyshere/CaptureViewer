@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AppDefaults.hpp"
 #include "DeviceEnumeration.hpp"
 
 #include <Windows.h>
@@ -35,7 +36,7 @@ public:
 private:
     struct BridgeOption {
         SerialPortInfo port;
-        unsigned int suggestedBaud = 6000000;
+        unsigned int suggestedBaud = AppDefaults::kDefaultSerialBaudRate;
     };
 
     void showMenu(Application& app);
@@ -60,4 +61,5 @@ private:
     std::vector<MicrophoneDeviceInfo> microphoneDevices_;
     std::vector<BridgeOption> bridgeDevices_;
     std::vector<VideoModeInfo> videoModes_;
+    unsigned int bridgeBaudRateDraft_ = AppDefaults::kDefaultSerialBaudRate;
 };

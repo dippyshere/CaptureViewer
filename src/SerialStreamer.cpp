@@ -232,7 +232,7 @@ void SerialStreamer::setBaudRate(unsigned int baudRate)
 {
     if (baudRate == 0)
     {
-        baudRate = kDefaultBaudRate;
+        baudRate = AppDefaults::kDefaultSerialBaudRate;
     }
 
     std::lock_guard<std::mutex> lock(mutex_);
