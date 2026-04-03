@@ -23,13 +23,7 @@ struct AppSettings {
     std::string videoDeviceMoniker;
     std::string audioDeviceMoniker;
     bool audioPlaybackEnabled = true;
-    bool microphoneCaptureEnabled = false;
-    std::string microphoneDeviceId;
-    bool microphoneAutoGain = true;
-    bool inputCaptureEnabled = true;
     bool mouseAbsoluteMode = true;
-    std::string inputTargetDevice;
-    unsigned int serialBaudRate = 6000000;
     unsigned int videoPreferredWidth = 0;
     unsigned int videoPreferredHeight = 0;
     bool videoAllowResizing = true;

@@ -24,13 +24,12 @@
 
 namespace
 {
-    constexpr wchar_t kWindowClassName[] = L"PCKVM.GC573.Window";
+    constexpr wchar_t kWindowClassName[] = L"GC573.Window";
     constexpr int kDefaultWidth = 1920;
     constexpr int kDefaultHeight = 1080;
 
     constexpr UINT_PTR kTimerRenderDuringInteraction = 0x7101;
     const std::string kAudioSourceVideoSentinel = "@video";
-    constexpr unsigned int kSerialBaudRateDefault = 6000000;
 
     std::wstring utf8ToWide(const std::string& text)
     {
@@ -58,10 +57,7 @@ Application::Application() = default;
 Application::~Application()
 {
     running_ = false;
-    inputCaptureManager_.setEnabled(false);
-    microphoneCapture_.stop();
     audioPlayback_.stop();
-    serialStreamer_.stop();
     directShowCapture_.stop();
     renderer_.shutdown();
     unregisterMenuHotkey();
@@ -135,21 +131,13 @@ int Application::run()
         return EXIT_FAILURE;
     }
 
-
-    serialStreamer_.start();
-    applySerialTargetSetting();
-    applyInputCaptureSetting();
-    applyMicrophoneCaptureSetting();
     applyAudioPlaybackSetting();
 
     logApp("[App] Entering render loop");
     renderLoop();
     logApp("[App] Render loop exited");
 
-    inputCaptureManager_.setEnabled(false);
-    microphoneCapture_.stop();
     audioPlayback_.stop();
-    serialStreamer_.stop();
 
     directShowCapture_.stop();
     logApp("[App] DirectShow capture stopped");
@@ -244,11 +232,9 @@ LRESULT CALLBACK Application::windowProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
         const UINT height = HIWORD(lParam);
         self->renderer_.onResize(width, height);
         logApp("[App] WM_SIZE -> " + std::to_string(width) + "x" + std::to_string(height));
-        self->updateInputCaptureBounds();
         return 0;
     }
     case WM_MOVE:
-        self->updateInputCaptureBounds();
         return 0;
     case WM_ENTERSIZEMOVE:
         SetTimer(hwnd, kTimerRenderDuringInteraction, 16, nullptr);
@@ -257,7 +243,6 @@ LRESULT CALLBACK Application::windowProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
     case WM_EXITSIZEMOVE:
         KillTimer(hwnd, kTimerRenderDuringInteraction);
         self->renderFrame(true);
-        self->updateInputCaptureBounds();
         return 0;
     case WM_TIMER:
         if (wParam == kTimerRenderDuringInteraction)
@@ -274,38 +259,22 @@ LRESULT CALLBACK Application::windowProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
         else
         {
             self->unregisterMenuHotkey();
-            self->inputCaptureManager_.clearModifierState();
         }
-        self->updateInputCaptureBounds();
         return 0;
     case WM_SETFOCUS:
         self->registerMenuHotkey();
-        self->updateInputCaptureBounds();
         return 0;
     case WM_KILLFOCUS:
         self->unregisterMenuHotkey();
-        self->inputCaptureManager_.clearModifierState();
-        self->updateInputCaptureBounds();
         return 0;
     case WM_SHOWWINDOW:
-        if (!wParam)
-        {
-            self->inputCaptureManager_.clearModifierState();
-        }
-        self->updateInputCaptureBounds();
         return 0;
     case WM_ACTIVATE:
-        if (LOWORD(wParam) == WA_INACTIVE)
-        {
-            self->inputCaptureManager_.clearModifierState();
-        }
-        self->updateInputCaptureBounds();
         return 0;
     case WM_KEYDOWN:
-        if (wParam == 'G')
+        if (wParam == 'M')
         {
-            const bool newState = !self->renderer_.debugGradientEnabled();
-            self->renderer_.setDebugGradient(newState);
+            self->showSettingsMenu();
             return 0;
         }
         break;
@@ -315,30 +284,6 @@ LRESULT CALLBACK Application::windowProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
             return 0;
         }
         break;
-    case WM_HOTKEY:
-        if (self->ignoreMenuHotkeyUntil_ != 0)
-        {
-            const DWORD now = GetTickCount();
-            if (now <= self->ignoreMenuHotkeyUntil_)
-            {
-                self->ignoreMenuHotkeyUntil_ = 0;
-                return 0;
-            }
-            self->ignoreMenuHotkeyUntil_ = 0;
-        }
-        if (wParam == self->menuHotkeyId_ && self->isMenuHotkeySatisfied())
-        {
-            self->showSettingsMenu();
-            return 0;
-        }
-        break;
-    case WM_INPUT_CAPTURE_SHOW_MENU:
-        self->ignoreMenuHotkeyUntil_ = GetTickCount() + 250;
-        self->showSettingsMenu();
-        return 0;
-    case WM_INPUT_CAPTURE_UPDATE_CLIP:
-        self->inputCaptureManager_.applyCursorClip(wParam != 0);
-        return 0;
     case WM_CLOSE:
         logApp("[App] WM_CLOSE received");
         break;
@@ -371,19 +316,39 @@ bool Application::createWindow(int width, int height)
     }
     classRegistered_ = true;
 
-    DWORD style = WS_OVERLAPPEDWINDOW | WS_VISIBLE;
+    DWORD style = WS_POPUP | WS_VISIBLE;
     RECT rect{0, 0, width, height};
     AdjustWindowRect(&rect, style, FALSE);
+
+    const int windowWidth = rect.right - rect.left;
+    const int windowHeight = rect.bottom - rect.top;
+
+    int windowX = CW_USEDEFAULT;
+    int windowY = CW_USEDEFAULT;
+
+    POINT cursorPos{};
+    if (GetCursorPos(&cursorPos))
+    {
+        const HMONITOR monitor = MonitorFromPoint(cursorPos, MONITOR_DEFAULTTONEAREST);
+        MONITORINFO monitorInfo{};
+        monitorInfo.cbSize = sizeof(monitorInfo);
+        if (monitor && GetMonitorInfoW(monitor, &monitorInfo))
+        {
+            const int monitorWidth = monitorInfo.rcMonitor.right - monitorInfo.rcMonitor.left;
+            windowX = monitorInfo.rcMonitor.left + (monitorWidth - windowWidth) / 2;
+            windowY = monitorInfo.rcMonitor.top + 140;
+        }
+    }
 
     hwnd_ = CreateWindowExW(
         WS_EX_APPWINDOW,
         kWindowClassName,
-        L"CaptureKVM",
+        L"Nintendo Switch 2",
         style,
-        CW_USEDEFAULT,
-        CW_USEDEFAULT,
-        rect.right - rect.left,
-        rect.bottom - rect.top,
+        windowX,
+        windowY,
+        windowWidth,
+        windowHeight,
         nullptr,
         nullptr,
         GetModuleHandle(nullptr),
@@ -395,15 +360,13 @@ bool Application::createWindow(int width, int height)
         return false;
     }
 
-    if (!SetWindowTextW(hwnd_, L"CaptureKVM"))
+    if (!SetWindowTextW(hwnd_, L"Nintendo Switch 2"))
     {
         logApp("[App] SetWindowTextW failed");
     }
 
     ShowWindow(hwnd_, SW_SHOW);
     UpdateWindow(hwnd_);
-    inputCaptureManager_.setTargetWindow(hwnd_);
-    updateInputCaptureBounds();
     RECT initialClient{};
     if (GetClientRect(hwnd_, &initialClient))
     {
@@ -569,86 +532,21 @@ void Application::renderLoop()
 void Application::loadPersistentSettings()
 {
     settings_ = settingsManager_.load();
-    settings_.inputTargetDevice.clear();
     if (settings_.menuHotkey.virtualKey == 0)
     {
         settings_.menuHotkey = SettingsManager::defaultMenuHotkey();
-    }
-    if (settings_.serialBaudRate == 0)
-    {
-        settings_.serialBaudRate = kSerialBaudRateDefault;
     }
     if (settings_.audioPlaybackEnabled && settings_.audioDeviceMoniker.empty())
     {
         settings_.audioDeviceMoniker = kAudioSourceVideoSentinel;
     }
     settings_.mouseAbsoluteMode = true;
-    inputCaptureManager_.setAbsoluteMode(settings_.mouseAbsoluteMode);
     audioEnabled_ = shouldEnableCaptureAudio();
 }
 
 void Application::savePersistentSettings()
 {
     settingsManager_.save(settings_);
-}
-
-bool Application::registerMenuHotkey()
-{
-    if (!hwnd_)
-    {
-        menuHotkeyRegistered_ = false;
-        inputCaptureManager_.setMenuChordEnabled(false);
-        return false;
-    }
-
-    unregisterMenuHotkey();
-
-    HotkeyConfig hotkey = settings_.menuHotkey;
-    if (hotkey.virtualKey == 0)
-    {
-        hotkey = SettingsManager::defaultMenuHotkey();
-        settings_.menuHotkey = hotkey;
-        savePersistentSettings();
-    }
-
-    UINT modifiers = MOD_NOREPEAT;
-    if (hotkey.requireCtrl || hotkey.requireRightCtrl)
-    {
-        modifiers |= MOD_CONTROL;
-    }
-    if (hotkey.requireShift)
-    {
-        modifiers |= MOD_SHIFT;
-    }
-    if (hotkey.requireAlt)
-    {
-        modifiers |= MOD_ALT;
-    }
-    if (hotkey.requireWin)
-    {
-        modifiers |= MOD_WIN;
-    }
-
-    inputCaptureManager_.setMenuChordEnabled(true);
-
-    if (RegisterHotKey(hwnd_, static_cast<int>(menuHotkeyId_), modifiers, static_cast<UINT>(hotkey.virtualKey)))
-    {
-        menuHotkeyRegistered_ = true;
-        return true;
-    }
-
-    menuHotkeyRegistered_ = false;
-    return false;
-}
-
-void Application::unregisterMenuHotkey()
-{
-    if (hwnd_ && menuHotkeyRegistered_)
-    {
-        UnregisterHotKey(hwnd_, static_cast<int>(menuHotkeyId_));
-    }
-    menuHotkeyRegistered_ = false;
-    inputCaptureManager_.setMenuChordEnabled(false);
 }
 
 void Application::showSettingsMenu()
@@ -741,46 +639,6 @@ void Application::applyAudioPlaybackSetting()
     }
 }
 
-void Application::applyInputCaptureSetting()
-{
-    settings_.mouseAbsoluteMode = true;
-    inputCaptureManager_.setAbsoluteMode(true);
-    inputCaptureManager_.setEnabled(settings_.inputCaptureEnabled);
-    if (menuHotkeyRegistered_)
-    {
-        inputCaptureManager_.setMenuChordEnabled(true);
-    }
-    else
-    {
-        inputCaptureManager_.setMenuChordEnabled(false);
-    }
-}
-
-void Application::applyMicrophoneCaptureSetting()
-{
-    if (settings_.microphoneCaptureEnabled)
-    {
-        microphoneCapture_.start(settings_.microphoneDeviceId, serialStreamer_, settings_.microphoneAutoGain);
-    }
-    else
-    {
-        microphoneCapture_.stop();
-    }
-}
-
-void Application::applySerialTargetSetting()
-{
-    if (!serialStreamer_.isRunning())
-    {
-        serialStreamer_.start();
-    }
-    const unsigned int baud = settings_.serialBaudRate == 0 ? kSerialBaudRateDefault : settings_.serialBaudRate;
-    serialStreamer_.setBaudRate(baud);
-    const std::wstring preferred = utf8ToWide(settings_.inputTargetDevice);
-    serialStreamer_.setPreferredPort(preferred);
-    serialStreamer_.requestReconnect();
-}
-
 void Application::setAudioPlaybackEnabled(bool enabled)
 {
     if (settings_.audioPlaybackEnabled == enabled)
@@ -796,32 +654,6 @@ void Application::setAudioPlaybackEnabled(bool enabled)
     savePersistentSettings();
     logApp(std::string("[App] Audio playback toggled -> ") + (settings_.audioPlaybackEnabled ? "enabled" : "disabled"));
     applyAudioPlaybackSetting();
-}
-
-void Application::setMicrophoneCaptureEnabled(bool enabled)
-{
-    if (settings_.microphoneCaptureEnabled == enabled)
-    {
-        return;
-    }
-
-    settings_.microphoneCaptureEnabled = enabled;
-    savePersistentSettings();
-    logApp(std::string("[App] Microphone capture toggled -> ") + (settings_.microphoneCaptureEnabled ? "enabled" : "disabled"));
-    applyMicrophoneCaptureSetting();
-}
-
-void Application::setInputCaptureEnabled(bool enabled)
-{
-    if (settings_.inputCaptureEnabled == enabled)
-    {
-        return;
-    }
-
-    settings_.inputCaptureEnabled = enabled;
-    savePersistentSettings();
-    logApp(std::string("[App] Input capture toggled -> ") + (settings_.inputCaptureEnabled ? "enabled" : "disabled"));
-    applyInputCaptureSetting();
 }
 
 void Application::selectVideoDevice(const std::string& moniker)
@@ -890,23 +722,6 @@ void Application::selectAudioDevice(const std::string& moniker)
     requestImmediateRender();
 }
 
-void Application::selectMicrophoneDevice(const std::string& endpointId)
-{
-    if (settings_.microphoneDeviceId == endpointId)
-    {
-        return;
-    }
-
-    settings_.microphoneDeviceId = endpointId;
-    savePersistentSettings();
-    logApp(std::string("[App] Selected microphone device: ") + settings_.microphoneDeviceId);
-    if (settings_.microphoneCaptureEnabled)
-    {
-        applyMicrophoneCaptureSetting();
-    }
-    requestImmediateRender();
-}
-
 void Application::setVideoAllowResizing(bool enabled)
 {
     if (settings_.videoAllowResizing == enabled)
@@ -944,7 +759,6 @@ void Application::setVideoAllowResizing(bool enabled)
         }
     }
 
-    updateInputCaptureBounds();
     requestImmediateRender();
 }
 
@@ -958,7 +772,6 @@ void Application::setVideoAspectMode(VideoAspectMode mode)
     settings_.videoAspectMode = mode;
     savePersistentSettings();
     logApp(std::string("[App] Video aspect mode -> ") + std::to_string(static_cast<unsigned int>(mode)));
-    updateInputCaptureBounds();
     requestImmediateRender();
 }
 
@@ -1032,77 +845,6 @@ void Application::renderFrame(bool forcePresent)
     }
 }
 
-void Application::selectBridgeDevice(const SerialPortInfo& info, bool autoSelect)
-{
-    unsigned int suggestedBaud = settings_.serialBaudRate == 0 ? kSerialBaudRateDefault : settings_.serialBaudRate;
-    if (!classifyBridgeDevice(info, &suggestedBaud))
-    {
-        if (suggestedBaud == 0)
-        {
-            suggestedBaud = kSerialBaudRateDefault;
-        }
-    }
-
-    const bool deviceChanged = settings_.inputTargetDevice != info.portName;
-    const bool baudChanged = settings_.serialBaudRate != suggestedBaud;
-    if (!deviceChanged && !baudChanged && autoSelect)
-    {
-        return;
-    }
-
-    settings_.inputTargetDevice = info.portName;
-    settings_.serialBaudRate = suggestedBaud;
-    savePersistentSettings();
-
-    logApp(std::string("[App] Bridge device -> ") + info.portName + " (baud " + std::to_string(suggestedBaud) + ")");
-
-    serialStreamer_.setBaudRate(suggestedBaud);
-
-    std::wstring preferred = utf8ToWide(info.portName);
-    serialStreamer_.setPreferredPort(preferred);
-    serialStreamer_.requestReconnect();
-}
-
-bool Application::classifyBridgeDevice(const SerialPortInfo& info, unsigned int* outBaud) const
-{
-    constexpr unsigned int kBaudEsp = kSerialBaudRateDefault;
-    constexpr unsigned int kBaudAlt = kSerialBaudRateDefault;
-
-    const std::string friendlyLower = toLowerCopy(info.friendlyName);
-    const std::string descLower = toLowerCopy(info.deviceDescription);
-
-    auto hardwareMatch = [&](const std::string& vidToken, const std::string& pidToken) {
-        for (const auto& id : info.hardwareIds)
-        {
-            std::string idLower = toLowerCopy(id);
-            if (idLower.find(vidToken) != std::string::npos && idLower.find(pidToken) != std::string::npos)
-            {
-                return true;
-            }
-        }
-        return false;
-    };
-
-    const bool isEsp = hardwareMatch("vid_303a", "pid_1001") ||
-                       friendlyLower.find("usb jtag/serial debug unit") != std::string::npos ||
-                       descLower.find("usb jtag/serial debug unit") != std::string::npos;
-
-    const bool isAlt = hardwareMatch("vid_1a86", "pid_55d3") ||
-                       friendlyLower.find("usb single serial") != std::string::npos ||
-                       descLower.find("usb single serial") != std::string::npos;
-
-    if (!isEsp && !isAlt)
-    {
-        return false;
-    }
-
-    if (outBaud)
-    {
-        *outBaud = isAlt ? kBaudAlt : kBaudEsp;
-    }
-    return true;
-}
-
 std::string Application::toLowerCopy(const std::string& text)
 {
     std::string result = text;
@@ -1137,7 +879,6 @@ void Application::applySourceDimensions(std::uint32_t width, std::uint32_t heigh
     {
         resizeWindowToClient(static_cast<int>(width), static_cast<int>(height));
         updateWindowResizeMode();
-        updateInputCaptureBounds();
     }
 }
 
@@ -1172,8 +913,26 @@ bool Application::resizeWindowToClient(int width, int height)
     const int windowWidth = desired.right - desired.left;
     const int windowHeight = desired.bottom - desired.top;
 
-    if (!SetWindowPos(hwnd_, nullptr, 0, 0, windowWidth, windowHeight,
-                      SWP_NOZORDER | SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOSENDCHANGING))
+    RECT currentWindowRect{};
+    if (!GetWindowRect(hwnd_, &currentWindowRect))
+    {
+        return false;
+    }
+
+    int windowX = currentWindowRect.left;
+    const int windowY = currentWindowRect.top;
+
+    const HMONITOR monitor = MonitorFromRect(&currentWindowRect, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO monitorInfo{};
+    monitorInfo.cbSize = sizeof(monitorInfo);
+    if (monitor && GetMonitorInfoW(monitor, &monitorInfo))
+    {
+        const int monitorWidth = monitorInfo.rcMonitor.right - monitorInfo.rcMonitor.left;
+        windowX = monitorInfo.rcMonitor.left + (monitorWidth - windowWidth) / 2;
+    }
+
+    if (!SetWindowPos(hwnd_, nullptr, windowX, windowY, windowWidth, windowHeight,
+                      SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOSENDCHANGING))
     {
         return false;
     }
@@ -1194,9 +953,7 @@ void Application::updateWindowResizeMode()
         return;
     }
 
-    const LONG_PTR desiredStyle = settings_.videoAllowResizing
-        ? (style | WS_THICKFRAME | WS_MAXIMIZEBOX)
-        : (style & ~(WS_THICKFRAME | WS_MAXIMIZEBOX));
+    const LONG_PTR desiredStyle = WS_POPUP | WS_VISIBLE;
 
     if (desiredStyle != style)
     {
@@ -1324,65 +1081,6 @@ RECT Application::computeVideoViewport(const RECT& clientRect, bool& valid) cons
     }
 
     return viewport;
-}
-
-void Application::updateInputCaptureBounds()
-{
-    if (!hwnd_ || !IsWindowVisible(hwnd_))
-    {
-        inputCaptureManager_.setCaptureRegion(RECT{}, false);
-        inputCaptureManager_.setVideoViewport(RECT{}, false);
-        renderer_.setViewportRect(0.0f, 0.0f, 0.0f, 0.0f);
-        return;
-    }
-
-    RECT client{};
-    if (!GetClientRect(hwnd_, &client))
-    {
-        inputCaptureManager_.setCaptureRegion(RECT{}, false);
-        inputCaptureManager_.setVideoViewport(RECT{}, false);
-        return;
-    }
-
-    POINT topLeft{client.left, client.top};
-    POINT bottomRight{client.right, client.bottom};
-    ClientToScreen(hwnd_, &topLeft);
-    ClientToScreen(hwnd_, &bottomRight);
-
-    RECT screenRect{topLeft.x, topLeft.y, bottomRight.x, bottomRight.y};
-
-    const bool windowHasArea = (screenRect.right > screenRect.left) && (screenRect.bottom > screenRect.top);
-    const bool windowActive = !IsIconic(hwnd_) && GetForegroundWindow() == hwnd_ && windowHasArea;
-    inputCaptureManager_.setCaptureRegion(screenRect, windowActive);
-
-    bool viewportValid = false;
-    RECT viewportClient = computeVideoViewport(client, viewportValid);
-
-    if (!viewportValid)
-    {
-        inputCaptureManager_.setVideoViewport(RECT{}, false);
-        const LONG clientWidth = client.right - client.left;
-        const LONG clientHeight = client.bottom - client.top;
-        renderer_.setViewportRect(0.0f,
-                                  0.0f,
-                                  static_cast<float>(std::max<LONG>(clientWidth, 0)),
-                                  static_cast<float>(std::max<LONG>(clientHeight, 0)));
-        return;
-    }
-
-    RECT viewportScreen{
-        topLeft.x + viewportClient.left,
-        topLeft.y + viewportClient.top,
-        topLeft.x + viewportClient.right,
-        topLeft.y + viewportClient.bottom
-    };
-
-    inputCaptureManager_.setVideoViewport(viewportScreen, viewportValid && windowActive);
-
-    renderer_.setViewportRect(static_cast<float>(viewportClient.left),
-                              static_cast<float>(viewportClient.top),
-                              static_cast<float>(viewportClient.right - viewportClient.left),
-                              static_cast<float>(viewportClient.bottom - viewportClient.top));
 }
 
 bool Application::shouldUseVideoAudio() const

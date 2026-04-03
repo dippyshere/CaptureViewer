@@ -14,18 +14,6 @@ struct AudioCaptureDeviceInfo {
     std::string friendlyName;
 };
 
-struct MicrophoneDeviceInfo {
-    std::string endpointId;
-    std::string friendlyName;
-};
-
-struct SerialPortInfo {
-    std::string portName;
-    std::string friendlyName;
-    std::string deviceDescription;
-    std::vector<std::string> hardwareIds;
-};
-
 struct VideoModeInfo {
     std::uint32_t width = 0;
     std::uint32_t height = 0;
@@ -34,6 +22,4 @@ struct VideoModeInfo {
 
 std::vector<VideoDeviceInfo> enumerateVideoCaptureDevices();
 std::vector<AudioCaptureDeviceInfo> enumerateAudioCaptureDevices();
-std::vector<MicrophoneDeviceInfo> enumerateMicrophoneDevices();
-std::vector<SerialPortInfo> enumerateSerialPorts();
 std::vector<VideoModeInfo> enumerateVideoModes(const std::string& monikerDisplayName);

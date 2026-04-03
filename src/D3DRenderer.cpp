@@ -513,7 +513,12 @@ void D3DRenderer::uploadFrame(const void* data,
     const auto* sourceBytes = static_cast<const std::uint8_t*>(data);
     const std::uint32_t bytesPerPixel = 4;
     const std::size_t rowCopySize = static_cast<std::size_t>(frameWidth_) * bytesPerPixel;
-    const std::size_t copyBytes = std::min<std::size_t>(rowCopySize, effectiveStride);
+    if (effectiveStride < rowCopySize)
+    {
+        return;
+    }
+
+    const std::size_t copyBytes = rowCopySize;
     std::uint8_t* dstBase = upload.cpuAddress + upload.layout.Offset;
     const std::size_t dstPitch = upload.layout.Footprint.RowPitch;
 

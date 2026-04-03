@@ -373,13 +373,7 @@ AppSettings SettingsManager::load()
     tryParseString(content, "videoDeviceMoniker", settings.videoDeviceMoniker);
     tryParseString(content, "audioDeviceMoniker", settings.audioDeviceMoniker);
     tryParseBool(content, "audioPlaybackEnabled", settings.audioPlaybackEnabled);
-    tryParseBool(content, "microphoneCaptureEnabled", settings.microphoneCaptureEnabled);
-    tryParseString(content, "microphoneDeviceId", settings.microphoneDeviceId);
-    tryParseBool(content, "microphoneAutoGain", settings.microphoneAutoGain);
-    tryParseBool(content, "inputCaptureEnabled", settings.inputCaptureEnabled);
     tryParseBool(content, "mouseAbsoluteMode", settings.mouseAbsoluteMode);
-    tryParseString(content, "inputTargetDevice", settings.inputTargetDevice);
-    tryParseUInt(content, "serialBaudRate", settings.serialBaudRate);
     tryParseUInt(content, "videoPreferredWidth", settings.videoPreferredWidth);
     tryParseUInt(content, "videoPreferredHeight", settings.videoPreferredHeight);
     tryParseBool(content, "videoAllowResizing", settings.videoAllowResizing);
@@ -452,13 +446,7 @@ void SettingsManager::save(const AppSettings& settings) const
     file << "  \"videoDeviceMoniker\": \"" << escapeJson(settings.videoDeviceMoniker) << "\",\n";
     file << "  \"audioDeviceMoniker\": \"" << escapeJson(settings.audioDeviceMoniker) << "\",\n";
     file << "  \"audioPlaybackEnabled\": " << (settings.audioPlaybackEnabled ? "true" : "false") << ",\n";
-    file << "  \"microphoneCaptureEnabled\": " << (settings.microphoneCaptureEnabled ? "true" : "false") << ",\n";
-    file << "  \"microphoneAutoGain\": " << (settings.microphoneAutoGain ? "true" : "false") << ",\n";
-    file << "  \"microphoneDeviceId\": \"" << escapeJson(settings.microphoneDeviceId) << "\",\n";
-    file << "  \"inputCaptureEnabled\": " << (settings.inputCaptureEnabled ? "true" : "false") << ",\n";
     file << "  \"mouseAbsoluteMode\": " << (settings.mouseAbsoluteMode ? "true" : "false") << ",\n";
-    file << "  \"inputTargetDevice\": \"" << escapeJson(settings.inputTargetDevice) << "\",\n";
-    file << "  \"serialBaudRate\": " << settings.serialBaudRate << ",\n";
     file << "  \"videoPreferredWidth\": " << settings.videoPreferredWidth << ",\n";
     file << "  \"videoPreferredHeight\": " << settings.videoPreferredHeight << ",\n";
     file << "  \"videoAllowResizing\": " << (settings.videoAllowResizing ? "true" : "false") << ",\n";

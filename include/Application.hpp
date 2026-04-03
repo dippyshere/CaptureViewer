@@ -5,9 +5,7 @@
 #include "DirectShowCapture.hpp"
 #include "D3DRenderer.hpp"
 #include "Settings.hpp"
-#include "SerialStreamer.hpp"
 #include "InputCapture.hpp"
-#include "MicrophoneCapture.hpp"
 #include "AudioPlayback.hpp"
 #include "OverlayUI.hpp"
 #include "DeviceEnumeration.hpp"
@@ -42,15 +40,9 @@ private:
     void parseCommandLine();
     void loadPersistentSettings();
     void savePersistentSettings();
-    bool registerMenuHotkey();
-    void unregisterMenuHotkey();
     void showSettingsMenu();
     bool isMenuHotkeySatisfied() const;
     void applyAudioPlaybackSetting();
-    void applyInputCaptureSetting();
-    void applyMicrophoneCaptureSetting();
-    void applySerialTargetSetting();
-    void updateInputCaptureBounds();
     void restartVideoCapture();
     bool shouldUseVideoAudio() const;
     bool shouldEnableCaptureAudio() const;
@@ -62,18 +54,13 @@ private:
     bool uploadLatestFrame();
     void renderFrame(bool forcePresent);
     void setAudioPlaybackEnabled(bool enabled);
-    void setMicrophoneCaptureEnabled(bool enabled);
-    void setInputCaptureEnabled(bool enabled);
     void selectVideoDevice(const std::string& moniker);
     void selectAudioDevice(const std::string& moniker);
-    void selectMicrophoneDevice(const std::string& endpointId);
     void setVideoResolution(std::uint32_t width, std::uint32_t height);
     void setVideoAllowResizing(bool enabled);
     void setVideoAspectMode(VideoAspectMode mode);
     void requestImmediateRender();
     void processPendingSourceDimensions();
-    void selectBridgeDevice(const SerialPortInfo& info, bool autoSelect);
-    bool classifyBridgeDevice(const SerialPortInfo& info, unsigned int* outBaud) const;
     static std::string toLowerCopy(const std::string& text);
     HWND hwnd() const { return hwnd_; }
     AppSettings& settings() { return settings_; }
@@ -94,9 +81,7 @@ private:
     bool classRegistered_ = false;
     bool audioEnabled_ = false;
 
-    SerialStreamer serialStreamer_;
-    InputCaptureManager inputCaptureManager_{serialStreamer_};
-    MicrophoneCapture microphoneCapture_;
+    InputCaptureManager inputCaptureManager_;
     AudioPlayback audioPlayback_;
     OverlayUI overlay_;
 

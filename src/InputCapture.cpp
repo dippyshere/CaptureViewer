@@ -1,5 +1,4 @@
 #include "InputCapture.hpp"
-#include "SerialStreamer.hpp"
 
 #include <algorithm>
 #include <array>
@@ -60,12 +59,7 @@ namespace
 InputCaptureManager* InputCaptureManager::instance_ = nullptr;
 std::mutex InputCaptureManager::instanceMutex_;
 
-InputCaptureManager::InputCaptureManager(SerialStreamer& streamer)
-    : streamer_(streamer)
-{
-}
-
-InputCaptureManager::~InputCaptureManager()
+InputCaptureManager::InputCaptureManager()
 {
     stopRelativeCapture(false);
     removeHooks();
@@ -677,8 +671,6 @@ void InputCaptureManager::handleMouseEvent(WPARAM wParam, const MSLLHOOKSTRUCT& 
         report[3] = static_cast<std::uint8_t>(wheel);
         report[4] = static_cast<std::uint8_t>(pan);
 
-        streamer_.publishMouseReport(report);
-
         SetCursorPos(anchor.x, anchor.y);
     }
 }
@@ -765,8 +757,6 @@ void InputCaptureManager::sendKeyboardReport()
             report[index++] = usage;
         }
     }
-
-    streamer_.publishKeyboardReport(report);
 }
 
 void InputCaptureManager::resetKeyboardState()
@@ -780,7 +770,6 @@ void InputCaptureManager::resetKeyboardState()
     leftButtonDown_ = rightButtonDown_ = middleButtonDown_ = false;
     xButton1Down_ = xButton2Down_ = false;
     std::array<std::uint8_t, 8> report{};
-    streamer_.publishKeyboardReport(report);
 }
 
 void InputCaptureManager::clearModifierState()
@@ -803,7 +792,6 @@ void InputCaptureManager::clearModifierState()
         else if (!absoluteMode_.load(std::memory_order_acquire) && relativeCaptureActive_.load(std::memory_order_acquire))
         {
             std::array<std::uint8_t, 5> report{};
-            streamer_.publishMouseReport(report);
         }
     }
 }
@@ -925,7 +913,6 @@ bool InputCaptureManager::sendAbsoluteMouseState(POINT point, std::uint8_t butto
     report[5] = static_cast<std::uint8_t>(wheel);
     report[6] = static_cast<std::uint8_t>(pan);
 
-    streamer_.publishMouseAbsoluteReport(report);
     return true;
 }
 

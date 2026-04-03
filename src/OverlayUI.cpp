@@ -39,6 +39,7 @@ bool OverlayUI::initialize(HWND hwnd, D3DRenderer& renderer)
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    io.Fonts->Build();
 
     ImGui::StyleColorsDark();
     ImGuiStyle& style = ImGui::GetStyle();
@@ -189,30 +190,6 @@ void OverlayUI::refreshDeviceLists(Application& app)
 {
     videoDevices_ = enumerateVideoCaptureDevices();
     audioDevices_ = enumerateAudioCaptureDevices();
-    microphoneDevices_ = enumerateMicrophoneDevices();
-
-    bridgeDevices_.clear();
-    const auto serialPorts = enumerateSerialPorts();
-    for (const auto& port : serialPorts)
-    {
-        unsigned int suggestedBaud = 0;
-        if (app.classifyBridgeDevice(port, &suggestedBaud))
-        {
-            BridgeOption option;
-            option.port = port;
-            option.suggestedBaud = suggestedBaud;
-            bridgeDevices_.push_back(std::move(option));
-        }
-    }
-
-    if (bridgeDevices_.size() == 1)
-    {
-        const BridgeOption& option = bridgeDevices_.front();
-        if (app.settings().inputTargetDevice != option.port.portName)
-        {
-            app.selectBridgeDevice(option.port, true);
-        }
-    }
 
     refreshVideoModes(app);
 }
@@ -277,71 +254,6 @@ void OverlayUI::drawMenuWindow(Application& app)
         app.setAudioPlaybackEnabled(audioPlayback);
     }
 
-    bool microphoneCapture = app.settings().microphoneCaptureEnabled;
-    if (ImGui::Checkbox("Enable Microphone Capture", &microphoneCapture))
-    {
-        app.setMicrophoneCaptureEnabled(microphoneCapture);
-    }
-
-    bool inputCapture = app.settings().inputCaptureEnabled;
-    if (ImGui::Checkbox("Enable Keyboard && Mouse Capture", &inputCapture))
-    {
-        app.setInputCaptureEnabled(inputCapture);
-    }
-
-    ImGui::Spacing();
-
-    ImGui::TextUnformatted("Bridge Device");
-    ImGui::Separator();
-    if (bridgeDevices_.empty())
-    {
-        ImGui::TextDisabled("No supported bridge devices detected");
-    }
-    else
-    {
-        ImGui::BeginChild("BridgeDevices", ImVec2(0.0f, 110.0f), true);
-        const std::string& currentBridge = app.settings().inputTargetDevice;
-        for (const auto& option : bridgeDevices_)
-        {
-            std::string label = option.port.friendlyName.empty() ? option.port.portName : option.port.friendlyName;
-            if (label.empty())
-            {
-                label = option.port.portName;
-            }
-            if (!option.port.portName.empty())
-            {
-                label += " (" + option.port.portName + ")";
-            }
-            label += "##bridge" + option.port.portName;
-            bool selected = (!currentBridge.empty() && currentBridge == option.port.portName);
-            if (ImGui::Selectable(label.c_str(), selected))
-            {
-                app.selectBridgeDevice(option.port, false);
-            }
-            if (ImGui::IsItemHovered())
-            {
-                std::string tooltip;
-                tooltip.reserve(128);
-                tooltip += "Port: " + option.port.portName;
-                if (!option.port.deviceDescription.empty())
-                {
-                    tooltip += "\nDescription: " + option.port.deviceDescription;
-                }
-                tooltip += "\nSuggested baud: " + std::to_string(option.suggestedBaud);
-                if (!option.port.hardwareIds.empty())
-                {
-                    tooltip += "\nHardware IDs:";
-                    for (const auto& id : option.port.hardwareIds)
-                    {
-                        tooltip += "\n  " + id;
-                    }
-                }
-                ImGui::SetTooltip("%s", tooltip.c_str());
-            }
-        }
-        ImGui::EndChild();
-    }
-
     ImGui::Spacing();
 
     ImGui::TextUnformatted("Video Settings");
@@ -372,7 +284,7 @@ void OverlayUI::drawMenuWindow(Application& app)
     const float listHeight = 130.0f;
 
     ImGui::TextUnformatted("Video Capture Devices");
-    ImGui::BeginChild("VideoDevices", ImVec2(0.0f, listHeight), true);
+    ImGui::BeginChild("VideoDevices", ImVec2(0.0f, listHeight), ImGuiChildFlags_Borders);
     const std::string& currentVideo = app.settings().videoDeviceMoniker;
     if (videoDevices_.empty())
     {
@@ -449,7 +361,7 @@ void OverlayUI::drawMenuWindow(Application& app)
     ImGui::Spacing();
 
     ImGui::TextUnformatted("Audio Capture Devices");
-    ImGui::BeginChild("AudioDevices", ImVec2(0.0f, listHeight), true);
+    ImGui::BeginChild("AudioDevices", ImVec2(0.0f, listHeight), ImGuiChildFlags_Borders);
     const std::string& currentAudio = app.settings().audioDeviceMoniker;
     bool useVideoAudio = currentAudio == "@video" || currentAudio.empty();
     if (ImGui::Selectable("Use Video Source Audio", useVideoAudio))
@@ -475,27 +387,6 @@ void OverlayUI::drawMenuWindow(Application& app)
     ImGui::EndChild();
 
     ImGui::Spacing();
-
-    ImGui::TextUnformatted("Microphone Devices");
-    ImGui::BeginChild("MicrophoneDevices", ImVec2(0.0f, listHeight), true);
-    const std::string& currentMic = app.settings().microphoneDeviceId;
-    if (microphoneDevices_.empty())
-    {
-        ImGui::TextDisabled("No microphone devices detected");
-    }
-    else
-    {
-        for (const auto& device : microphoneDevices_)
-        {
-            std::string label = !device.friendlyName.empty() ? device.friendlyName : device.endpointId;
-            bool selected = (!currentMic.empty() && currentMic == device.endpointId);
-            if (ImGui::Selectable(label.c_str(), selected))
-            {
-                app.selectMicrophoneDevice(device.endpointId);
-            }
-        }
-    }
-    ImGui::EndChild();
 
     if (ImGui::IsKeyReleased(ImGuiKey_Escape))
     {

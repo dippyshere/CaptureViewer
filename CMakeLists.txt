@@ -14,9 +14,9 @@ add_executable(pckvm
     src/D3DRenderer.cpp
     src/Settings.cpp
     src/DeviceEnumeration.cpp
-    src/SerialStreamer.cpp
+    
     src/InputCapture.cpp
-    src/MicrophoneCapture.cpp
+    
     src/AudioPlayback.cpp
     src/OverlayUI.cpp
     third_party/imgui/imgui.cpp

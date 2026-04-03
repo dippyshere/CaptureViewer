@@ -28,6 +28,7 @@ namespace
     const GUID kIID_ISampleGrabber = {0x6B652FFF, 0x11FE, 0x4FCE, {0x92, 0xAD, 0x02, 0x66, 0xB5, 0xD7, 0xC7, 0x8F}};
     const GUID kIID_ISampleGrabberCB = {0x0579154A, 0x2B53, 0x4994, {0xB0, 0xD0, 0xE7, 0x73, 0x14, 0x8E, 0xFF, 0x85}};
     const GUID kCLSID_NullRenderer = {0xC1F400A4, 0x3F08, 0x11D3, {0x9F, 0x0B, 0x00, 0x60, 0x08, 0x03, 0x9E, 0x37}};
+    const GUID kPreferredVideoSubtypeXrgb = MEDIASUBTYPE_RGB32;
 
     using Microsoft::WRL::ComPtr;
 
@@ -106,6 +107,11 @@ namespace
             mt.pUnk->Release();
             mt.pUnk = nullptr;
         }
+    }
+
+    bool isSubtype(const GUID& value, const GUID& expected)
+    {
+        return InlineIsEqualGUID(value, expected) != FALSE;
     }
 }
 
@@ -526,9 +532,10 @@ struct DirectShowCaptureImpl
 
         AM_MEDIA_TYPE mediaType{};
         mediaType.majortype = MEDIATYPE_Video;
-        mediaType.subtype = MEDIASUBTYPE_RGB32;
         mediaType.formattype = FORMAT_VideoInfo;
+        mediaType.subtype = kPreferredVideoSubtypeXrgb;
         throwIfFailed(sampleGrabber->SetMediaType(&mediaType), "Failed to set Sample Grabber media type");
+        logMessage("[Capture] Sample Grabber requested XRGB-compatible RGB32 media subtype");
 
         throwIfFailed(graph->AddFilter(sampleGrabberFilter.Get(), L"Sample Grabber"),
                       "Failed to add Sample Grabber to graph");
@@ -613,6 +620,7 @@ struct DirectShowCaptureImpl
 
         std::vector<std::uint8_t> capabilityBuffer(static_cast<std::size_t>(capabilitySize));
         bool applied = false;
+        AM_MEDIA_TYPE* genericCandidate = nullptr;
 
         for (int i = 0; i < capabilityCount; ++i)
         {
@@ -623,33 +631,67 @@ struct DirectShowCaptureImpl
             }
 
             const bool hasVideoInfo = mediaType->formattype == FORMAT_VideoInfo && mediaType->cbFormat >= sizeof(VIDEOINFOHEADER) && mediaType->pbFormat;
-            if (hasVideoInfo)
-            {
-                const auto* vih = reinterpret_cast<const VIDEOINFOHEADER*>(mediaType->pbFormat);
-                const std::uint32_t width = static_cast<std::uint32_t>(std::abs(vih->bmiHeader.biWidth));
-                const std::uint32_t height = static_cast<std::uint32_t>(std::abs(vih->bmiHeader.biHeight));
-                if (width == requestedWidth && height == requestedHeight)
-                {
-                    if (SUCCEEDED(streamConfig->SetFormat(mediaType)))
-                    {
-                        logMessage("[Capture] Requested capture format " + std::to_string(requestedWidth) + "x" + std::to_string(requestedHeight) + " applied successfully");
-                        applied = true;
-                    }
-                    else
-                    {
-                        logMessage("[Capture] Failed to apply requested capture format " + std::to_string(requestedWidth) + "x" + std::to_string(requestedHeight));
-                    }
-                    freeMediaType(*mediaType);
-                    CoTaskMemFree(mediaType);
-                    break;
-                }
-            }
-
-            if (mediaType)
+            if (!hasVideoInfo)
             {
                 freeMediaType(*mediaType);
                 CoTaskMemFree(mediaType);
+                continue;
             }
+
+            const auto* vih = reinterpret_cast<const VIDEOINFOHEADER*>(mediaType->pbFormat);
+            const std::uint32_t width = static_cast<std::uint32_t>(std::abs(vih->bmiHeader.biWidth));
+            const std::uint32_t height = static_cast<std::uint32_t>(std::abs(vih->bmiHeader.biHeight));
+            if (width != requestedWidth || height != requestedHeight)
+            {
+                freeMediaType(*mediaType);
+                CoTaskMemFree(mediaType);
+                continue;
+            }
+
+            if (isSubtype(mediaType->subtype, kPreferredVideoSubtypeXrgb))
+            {
+                if (SUCCEEDED(streamConfig->SetFormat(mediaType)))
+                {
+                    logMessage("[Capture] Requested capture format " + std::to_string(requestedWidth) + "x" + std::to_string(requestedHeight) + " applied as XRGB-compatible RGB32");
+                    applied = true;
+                }
+                else
+                {
+                    logMessage("[Capture] Failed to apply requested capture format " + std::to_string(requestedWidth) + "x" + std::to_string(requestedHeight) + " as XRGB-compatible RGB32");
+                }
+
+                freeMediaType(*mediaType);
+                CoTaskMemFree(mediaType);
+                break;
+            }
+
+            if (!genericCandidate)
+            {
+                genericCandidate = mediaType;
+                continue;
+            }
+
+            freeMediaType(*mediaType);
+            CoTaskMemFree(mediaType);
+        }
+
+        if (!applied && genericCandidate)
+        {
+            if (SUCCEEDED(streamConfig->SetFormat(genericCandidate)))
+            {
+                logMessage("[Capture] Requested capture format " + std::to_string(requestedWidth) + "x" + std::to_string(requestedHeight) + " applied using non-RGB fallback subtype");
+                applied = true;
+            }
+            else
+            {
+                logMessage("[Capture] Failed to apply requested capture format " + std::to_string(requestedWidth) + "x" + std::to_string(requestedHeight) + " using non-RGB fallback subtype");
+            }
+        }
+
+        if (genericCandidate)
+        {
+            freeMediaType(*genericCandidate);
+            CoTaskMemFree(genericCandidate);
         }
 
         if (!applied)

@@ -8,15 +8,11 @@
 #include <vector>
 #include <array>
 
-constexpr UINT WM_INPUT_CAPTURE_SHOW_MENU = WM_APP + 0x201;
-constexpr UINT WM_INPUT_CAPTURE_UPDATE_CLIP = WM_APP + 0x202;
-
 class SerialStreamer;
 
 class InputCaptureManager {
 public:
-    explicit InputCaptureManager(SerialStreamer& streamer);
-    ~InputCaptureManager();
+    InputCaptureManager();
 
     void setEnabled(bool enabled);
     [[nodiscard]] bool isEnabled() const noexcept { return enabled_.load(std::memory_order_acquire); }
@@ -64,7 +60,6 @@ private:
     bool computeClipRect(RECT& rect) const;
     static bool isMouseButtonDownMessage(WPARAM wParam);
 
-    SerialStreamer& streamer_;
     std::atomic<bool> enabled_{false};
     std::atomic<bool> absoluteMode_{false};
     std::atomic<bool> captureBoundsValid_{false};
