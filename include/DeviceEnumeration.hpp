@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Settings.hpp"
+
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -23,3 +25,4 @@ struct VideoModeInfo {
 std::vector<VideoDeviceInfo> enumerateVideoCaptureDevices();
 std::vector<AudioCaptureDeviceInfo> enumerateAudioCaptureDevices();
 std::vector<VideoModeInfo> enumerateVideoModes(const std::string& monikerDisplayName);
+std::vector<VideoFormatPreference> enumerateVideoFormats(const std::string& monikerDisplayName);

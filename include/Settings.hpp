@@ -3,20 +3,16 @@
 #include <string>
 #include <filesystem>
 
-struct HotkeyConfig {
-    unsigned int virtualKey = 0;
-    unsigned int chordVirtualKey = 0;
-    bool requireCtrl = false;
-    bool requireRightCtrl = false;
-    bool requireShift = false;
-    bool requireAlt = false;
-    bool requireWin = false;
-};
-
 enum class VideoAspectMode : unsigned int {
     Stretch = 0,
     Maintain = 1,
     Capture = 2,
+};
+
+enum class VideoFormatPreference : unsigned int {
+    Auto = 0,
+    XRGB = 1,
+    NV12 = 2,
 };
 
 struct AppSettings {
@@ -28,7 +24,7 @@ struct AppSettings {
     unsigned int videoPreferredHeight = 0;
     bool videoAllowResizing = true;
     VideoAspectMode videoAspectMode = VideoAspectMode::Maintain;
-    HotkeyConfig menuHotkey;
+    VideoFormatPreference videoFormatPreference = VideoFormatPreference::XRGB;
 };
 
 class SettingsManager {
@@ -40,7 +36,6 @@ public:
 
     [[nodiscard]] const std::filesystem::path& settingsFile() const noexcept { return settingsFile_; }
 
-    static HotkeyConfig defaultMenuHotkey();
 
 private:
     std::filesystem::path settingsFile_;

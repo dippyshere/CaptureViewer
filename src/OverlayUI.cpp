@@ -168,7 +168,6 @@ void OverlayUI::hideMenu(Application& app)
     }
     menuVisible_ = false;
     drawDataValid_ = false;
-    PostMessage(hwnd_, WM_INPUT_CAPTURE_UPDATE_CLIP, 1, 0);
     ImGui::GetIO().MouseDrawCursor = false;
     app.requestImmediateRender();
 }
@@ -181,7 +180,6 @@ void OverlayUI::showMenu(Application& app)
     }
     menuVisible_ = true;
     refreshDeviceLists(app);
-    PostMessage(hwnd_, WM_INPUT_CAPTURE_UPDATE_CLIP, 0, 0);
     ImGui::GetIO().MouseDrawCursor = true;
     app.requestImmediateRender();
 }
@@ -192,6 +190,7 @@ void OverlayUI::refreshDeviceLists(Application& app)
     audioDevices_ = enumerateAudioCaptureDevices();
 
     refreshVideoModes(app);
+    refreshVideoFormats(app);
 }
 
 void OverlayUI::refreshVideoModes(Application& app)
@@ -204,6 +203,18 @@ void OverlayUI::refreshVideoModes(Application& app)
     }
 
     videoModes_ = enumerateVideoModes(moniker);
+}
+
+void OverlayUI::refreshVideoFormats(Application& app)
+{
+    videoFormats_.clear();
+    const std::string& moniker = app.settings().videoDeviceMoniker;
+    if (moniker.empty())
+    {
+        return;
+    }
+
+    videoFormats_ = enumerateVideoFormats(moniker);
 }
 
 void OverlayUI::drawMenuWindow(Application& app)
@@ -300,6 +311,7 @@ void OverlayUI::drawMenuWindow(Application& app)
             {
                 app.selectVideoDevice(device.monikerDisplayName);
                 refreshVideoModes(app);
+                refreshVideoFormats(app);
             }
         }
     }
@@ -339,6 +351,56 @@ void OverlayUI::drawMenuWindow(Application& app)
             if (ImGui::Selectable(modeLabel.c_str(), selected))
             {
                 app.setVideoResolution(mode.width, mode.height);
+            }
+        }
+
+        ImGui::EndCombo();
+    }
+
+    const VideoFormatPreference currentFormat = app.settings().videoFormatPreference;
+    const auto formatLabel = [](VideoFormatPreference value) {
+        switch (value)
+        {
+        case VideoFormatPreference::XRGB:
+            return "XRGB";
+        case VideoFormatPreference::NV12:
+            return "NV12";
+        default:
+            return "Auto";
+        }
+    };
+
+    if (ImGui::BeginCombo("Capture Format", formatLabel(currentFormat)))
+    {
+        const bool autoSelected = currentFormat == VideoFormatPreference::Auto;
+        if (ImGui::Selectable("Auto", autoSelected))
+        {
+            app.setVideoFormatPreference(VideoFormatPreference::Auto);
+        }
+
+        bool hasXrgb = false;
+        bool hasNv12 = false;
+        for (VideoFormatPreference format : videoFormats_)
+        {
+            hasXrgb = hasXrgb || (format == VideoFormatPreference::XRGB);
+            hasNv12 = hasNv12 || (format == VideoFormatPreference::NV12);
+        }
+
+        if (hasXrgb)
+        {
+            const bool selected = currentFormat == VideoFormatPreference::XRGB;
+            if (ImGui::Selectable("XRGB", selected))
+            {
+                app.setVideoFormatPreference(VideoFormatPreference::XRGB);
+            }
+        }
+
+        if (hasNv12)
+        {
+            const bool selected = currentFormat == VideoFormatPreference::NV12;
+            if (ImGui::Selectable("NV12", selected))
+            {
+                app.setVideoFormatPreference(VideoFormatPreference::NV12);
             }
         }
 

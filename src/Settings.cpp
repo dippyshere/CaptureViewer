@@ -215,131 +215,11 @@ namespace
         value = unescapeJson(inner);
         return true;
     }
-
-    void parseMenuHotkey(const std::string& content, HotkeyConfig& hotkey)
-    {
-        const std::string key = makeQuotedKey("menuHotkey");
-        auto pos = content.find(key);
-        if (pos == std::string::npos)
-        {
-            return;
-        }
-        pos = content.find('{', pos + key.size());
-        if (pos == std::string::npos)
-        {
-            return;
-        }
-        int depth = 1;
-        std::size_t end = pos + 1;
-        while (end < content.size() && depth > 0)
-        {
-            char ch = content[end];
-            if (ch == '{')
-            {
-                ++depth;
-            }
-            else if (ch == '}')
-            {
-                --depth;
-                if (depth == 0)
-                {
-                    ++end;
-                    break;
-                }
-            }
-            ++end;
-        }
-        if (depth != 0)
-        {
-            return;
-        }
-        const std::string inner = content.substr(pos + 1, end - pos - 2);
-
-        hotkey.chordVirtualKey = 0;
-
-        auto parseVkToken = [](const std::string& token, unsigned int& out) {
-            if (token.empty())
-            {
-                return false;
-            }
-            if (token == "VK_INSERT")
-            {
-                out = VK_INSERT;
-                return true;
-            }
-            if (token == "VK_PRIOR")
-            {
-                out = VK_PRIOR;
-                return true;
-            }
-            if (token == "VK_NEXT")
-            {
-                out = VK_NEXT;
-                return true;
-            }
-            if (token == "VK_HOME")
-            {
-                out = VK_HOME;
-                return true;
-            }
-            if (token == "VK_END")
-            {
-                out = VK_END;
-                return true;
-            }
-            if (token.rfind("VK_0x", 0) == 0 || token.rfind("VK_0X", 0) == 0)
-            {
-                try
-                {
-                    const auto numeric = std::stoul(token.substr(4), nullptr, 16);
-                    out = static_cast<unsigned int>(numeric);
-                    return true;
-                }
-                catch (...)
-                {
-                    return false;
-                }
-            }
-            return false;
-        };
-
-        std::string vkName;
-        if (tryParseString(inner, "virtualKey", vkName))
-        {
-            parseVkToken(vkName, hotkey.virtualKey);
-        }
-        std::string chordName;
-        if (tryParseString(inner, "chordVirtualKey", chordName))
-        {
-            if (!parseVkToken(chordName, hotkey.chordVirtualKey))
-            {
-                hotkey.chordVirtualKey = 0;
-            }
-        }
-        tryParseBool(inner, "requireCtrl", hotkey.requireCtrl);
-        tryParseBool(inner, "requireRightCtrl", hotkey.requireRightCtrl);
-        tryParseBool(inner, "requireShift", hotkey.requireShift);
-        tryParseBool(inner, "requireAlt", hotkey.requireAlt);
-        tryParseBool(inner, "requireWin", hotkey.requireWin);
-    }
 }
 
 SettingsManager::SettingsManager()
     : settingsFile_(determineSettingsPath())
 {
-}
-
-HotkeyConfig SettingsManager::defaultMenuHotkey()
-{
-    HotkeyConfig config;
-    config.virtualKey = 'M';
-    config.chordVirtualKey = 0;
-    config.requireCtrl = true;
-    config.requireRightCtrl = false;
-    config.requireShift = false;
-    config.requireAlt = true;
-    config.requireWin = false;
-    return config;
 }
 
 std::filesystem::path SettingsManager::determineSettingsPath()
@@ -358,7 +238,6 @@ std::filesystem::path SettingsManager::determineSettingsPath()
 AppSettings SettingsManager::load()
 {
     AppSettings settings;
-    settings.menuHotkey = defaultMenuHotkey();
 
     std::ifstream file(settingsFile_, std::ios::binary);
     if (!file.is_open())
@@ -400,29 +279,14 @@ AppSettings SettingsManager::load()
             settings.videoAspectMode = legacyForceAspect ? VideoAspectMode::Maintain : VideoAspectMode::Stretch;
         }
     }
-    parseMenuHotkey(content, settings.menuHotkey);
 
-    const bool legacyMenuHotkey =
-        settings.menuHotkey.virtualKey == VK_INSERT &&
-        settings.menuHotkey.chordVirtualKey == 0 &&
-        settings.menuHotkey.requireCtrl &&
-        settings.menuHotkey.requireRightCtrl &&
-        !settings.menuHotkey.requireShift &&
-        !settings.menuHotkey.requireAlt &&
-        !settings.menuHotkey.requireWin;
-
-    const bool legacyHomeMenuHotkey =
-        settings.menuHotkey.virtualKey == VK_HOME &&
-        settings.menuHotkey.chordVirtualKey == VK_PRIOR &&
-        !settings.menuHotkey.requireCtrl &&
-        !settings.menuHotkey.requireRightCtrl &&
-        !settings.menuHotkey.requireShift &&
-        !settings.menuHotkey.requireAlt &&
-        !settings.menuHotkey.requireWin;
-
-    if (legacyMenuHotkey || legacyHomeMenuHotkey)
+    unsigned int formatPreferenceValue = static_cast<unsigned int>(settings.videoFormatPreference);
+    if (tryParseUInt(content, "videoFormatPreference", formatPreferenceValue))
     {
-        settings.menuHotkey = defaultMenuHotkey();
+        if (formatPreferenceValue <= static_cast<unsigned int>(VideoFormatPreference::NV12))
+        {
+            settings.videoFormatPreference = static_cast<VideoFormatPreference>(formatPreferenceValue);
+        }
     }
 
     return settings;
@@ -451,18 +315,6 @@ void SettingsManager::save(const AppSettings& settings) const
     file << "  \"videoPreferredHeight\": " << settings.videoPreferredHeight << ",\n";
     file << "  \"videoAllowResizing\": " << (settings.videoAllowResizing ? "true" : "false") << ",\n";
     file << "  \"videoAspectMode\": " << static_cast<unsigned int>(settings.videoAspectMode) << ",\n";
-    file << "  \"menuHotkey\": {\n";
-    file << "    \"virtualKey\": \"VK_0x";
-    file << std::uppercase << std::hex << std::setw(2) << std::setfill('0') << settings.menuHotkey.virtualKey;
-    file << std::nouppercase << std::dec << std::setfill(' ') << "\",\n";
-    file << "    \"chordVirtualKey\": \"VK_0x";
-    file << std::uppercase << std::hex << std::setw(2) << std::setfill('0') << settings.menuHotkey.chordVirtualKey;
-    file << std::nouppercase << std::dec << std::setfill(' ') << "\",\n";
-    file << "    \"requireCtrl\": " << (settings.menuHotkey.requireCtrl ? "true" : "false") << ",\n";
-    file << "    \"requireRightCtrl\": " << (settings.menuHotkey.requireRightCtrl ? "true" : "false") << ",\n";
-    file << "    \"requireShift\": " << (settings.menuHotkey.requireShift ? "true" : "false") << ",\n";
-    file << "    \"requireAlt\": " << (settings.menuHotkey.requireAlt ? "true" : "false") << ",\n";
-    file << "    \"requireWin\": " << (settings.menuHotkey.requireWin ? "true" : "false") << "\n";
-    file << "  }\n";
+    file << "  \"videoFormatPreference\": " << static_cast<unsigned int>(settings.videoFormatPreference) << "\n";
     file << "}\n";
 }

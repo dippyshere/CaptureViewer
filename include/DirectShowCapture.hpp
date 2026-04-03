@@ -13,6 +13,12 @@ public:
         BGRA8,
     };
 
+    enum class VideoFormatPreference {
+        Auto,
+        XRGB,
+        NV12,
+    };
+
     struct Frame {
         std::uint32_t width{};
         std::uint32_t height{};
@@ -36,6 +42,7 @@ public:
         bool enableAudio = false;
         std::uint32_t desiredWidth = 0;
         std::uint32_t desiredHeight = 0;
+        VideoFormatPreference videoFormatPreference = VideoFormatPreference::XRGB;
     };
 
     DirectShowCapture();

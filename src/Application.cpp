@@ -31,6 +31,20 @@ namespace
     constexpr UINT_PTR kTimerRenderDuringInteraction = 0x7101;
     const std::string kAudioSourceVideoSentinel = "@video";
 
+    DirectShowCapture::VideoFormatPreference toCaptureVideoFormat(VideoFormatPreference preference)
+    {
+        switch (preference)
+        {
+        case VideoFormatPreference::NV12:
+            return DirectShowCapture::VideoFormatPreference::NV12;
+        case VideoFormatPreference::Auto:
+            return DirectShowCapture::VideoFormatPreference::Auto;
+        case VideoFormatPreference::XRGB:
+        default:
+            return DirectShowCapture::VideoFormatPreference::XRGB;
+        }
+    }
+
     std::wstring utf8ToWide(const std::string& text)
     {
         if (text.empty())
@@ -60,7 +74,6 @@ Application::~Application()
     audioPlayback_.stop();
     directShowCapture_.stop();
     renderer_.shutdown();
-    unregisterMenuHotkey();
     destroyWindow();
 }
 
@@ -80,11 +93,6 @@ int Application::run()
     {
         logApp("[App] Failed to create window");
         return EXIT_FAILURE;
-    }
-
-    if (!registerMenuHotkey())
-    {
-        logApp("[App] Failed to register menu hotkey");
     }
 
     if (!renderer_.initialize(hwnd_))
@@ -112,6 +120,7 @@ int Application::run()
         captureOptions.enableAudio = audioEnabled_;
         captureOptions.desiredWidth = settings_.videoPreferredWidth;
         captureOptions.desiredHeight = settings_.videoPreferredHeight;
+        captureOptions.videoFormatPreference = toCaptureVideoFormat(settings_.videoFormatPreference);
 
         directShowCapture_.start([this](const DirectShowCapture::Frame& frame) {
             handleFrame(frame);
@@ -159,7 +168,6 @@ int Application::run()
         logApp(std::string("[App] Reporting error: ") + captureError);
     }
 
-    unregisterMenuHotkey();
     destroyWindow();
     logApp("[App] Window destroyed");
 
@@ -251,22 +259,6 @@ LRESULT CALLBACK Application::windowProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
             return 0;
         }
         return 0;
-    case WM_ACTIVATEAPP:
-        if (wParam)
-        {
-            self->registerMenuHotkey();
-        }
-        else
-        {
-            self->unregisterMenuHotkey();
-        }
-        return 0;
-    case WM_SETFOCUS:
-        self->registerMenuHotkey();
-        return 0;
-    case WM_KILLFOCUS:
-        self->unregisterMenuHotkey();
-        return 0;
     case WM_SHOWWINDOW:
         return 0;
     case WM_ACTIVATE:
@@ -309,6 +301,21 @@ bool Application::createWindow(int width, int height)
     wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
     wc.lpszClassName = kWindowClassName;
 
+    const HICON classIcon = static_cast<HICON>(LoadImageW(GetModuleHandle(nullptr),
+                                                          L"IDI_ICON1",
+                                                          IMAGE_ICON,
+                                                          GetSystemMetrics(SM_CXICON),
+                                                          GetSystemMetrics(SM_CYICON),
+                                                          LR_DEFAULTCOLOR));
+    const HICON classIconSmall = static_cast<HICON>(LoadImageW(GetModuleHandle(nullptr),
+                                                               L"IDI_ICON1",
+                                                               IMAGE_ICON,
+                                                               GetSystemMetrics(SM_CXSMICON),
+                                                               GetSystemMetrics(SM_CYSMICON),
+                                                               LR_DEFAULTCOLOR));
+    wc.hIcon = classIcon;
+    wc.hIconSm = classIconSmall;
+
     if (!RegisterClassExW(&wc))
     {
         logApp("[App] RegisterClassExW failed");
@@ -336,7 +343,7 @@ bool Application::createWindow(int width, int height)
         {
             const int monitorWidth = monitorInfo.rcMonitor.right - monitorInfo.rcMonitor.left;
             windowX = monitorInfo.rcMonitor.left + (monitorWidth - windowWidth) / 2;
-            windowY = monitorInfo.rcMonitor.top + 140;
+            windowY = monitorInfo.rcMonitor.top + 100;
         }
     }
 
@@ -358,6 +365,15 @@ bool Application::createWindow(int width, int height)
     {
         logApp("[App] CreateWindowExW failed");
         return false;
+    }
+
+    if (classIcon)
+    {
+        SendMessageW(hwnd_, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(classIcon));
+    }
+    if (classIconSmall)
+    {
+        SendMessageW(hwnd_, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(classIconSmall));
     }
 
     if (!SetWindowTextW(hwnd_, L"Nintendo Switch 2"))
@@ -382,8 +398,6 @@ void Application::destroyWindow()
 {
     if (hwnd_)
     {
-        inputCaptureManager_.setCaptureRegion(RECT{}, false);
-        inputCaptureManager_.setTargetWindow(nullptr);
         DestroyWindow(hwnd_);
         hwnd_ = nullptr;
     }
@@ -418,8 +432,6 @@ void Application::handleFrame(const DirectShowCapture::Frame& frame)
         pendingSourceHeight_.store(frameHeight, std::memory_order_release);
         sourceChangePending_.store(true, std::memory_order_release);
     }
-
-    inputCaptureManager_.setTargetResolution(static_cast<int>(frameWidth), static_cast<int>(frameHeight));
 
     const std::size_t requiredBytes = static_cast<std::size_t>(stride) * frameHeight;
     if (frame.dataSize < requiredBytes)
@@ -532,10 +544,6 @@ void Application::renderLoop()
 void Application::loadPersistentSettings()
 {
     settings_ = settingsManager_.load();
-    if (settings_.menuHotkey.virtualKey == 0)
-    {
-        settings_.menuHotkey = SettingsManager::defaultMenuHotkey();
-    }
     if (settings_.audioPlaybackEnabled && settings_.audioDeviceMoniker.empty())
     {
         settings_.audioDeviceMoniker = kAudioSourceVideoSentinel;
@@ -552,54 +560,6 @@ void Application::savePersistentSettings()
 void Application::showSettingsMenu()
 {
     overlay_.toggleMenu(*this);
-}
-
-bool Application::isMenuHotkeySatisfied() const
-{
-    const HotkeyConfig& hotkey = settings_.menuHotkey.virtualKey != 0 ? settings_.menuHotkey : SettingsManager::defaultMenuHotkey();
-
-    if (hotkey.chordVirtualKey != 0)
-    {
-        if ((GetAsyncKeyState(static_cast<int>(hotkey.chordVirtualKey)) & 0x8000) == 0)
-        {
-            return false;
-        }
-    }
-
-    if (hotkey.requireRightCtrl)
-    {
-        if ((GetAsyncKeyState(VK_RCONTROL) & 0x8000) == 0)
-        {
-            return false;
-        }
-    }
-    else if (hotkey.requireCtrl)
-    {
-        if ((GetAsyncKeyState(VK_CONTROL) & 0x8000) == 0)
-        {
-            return false;
-        }
-    }
-
-    if (hotkey.requireShift && (GetAsyncKeyState(VK_SHIFT) & 0x8000) == 0)
-    {
-        return false;
-    }
-    if (hotkey.requireAlt && (GetAsyncKeyState(VK_MENU) & 0x8000) == 0)
-    {
-        return false;
-    }
-    if (hotkey.requireWin)
-    {
-        const bool leftWin = (GetAsyncKeyState(VK_LWIN) & 0x8000) != 0;
-        const bool rightWin = (GetAsyncKeyState(VK_RWIN) & 0x8000) != 0;
-        if (!(leftWin || rightWin))
-        {
-            return false;
-        }
-    }
-
-    return true;
 }
 
 void Application::applyAudioPlaybackSetting()
@@ -772,6 +732,32 @@ void Application::setVideoAspectMode(VideoAspectMode mode)
     settings_.videoAspectMode = mode;
     savePersistentSettings();
     logApp(std::string("[App] Video aspect mode -> ") + std::to_string(static_cast<unsigned int>(mode)));
+    requestImmediateRender();
+}
+
+void Application::setVideoFormatPreference(VideoFormatPreference preference)
+{
+    if (settings_.videoFormatPreference == preference)
+    {
+        return;
+    }
+
+    settings_.videoFormatPreference = preference;
+    savePersistentSettings();
+    switch (preference)
+    {
+    case VideoFormatPreference::XRGB:
+        logApp("[App] Video format preference -> XRGB");
+        break;
+    case VideoFormatPreference::NV12:
+        logApp("[App] Video format preference -> NV12");
+        break;
+    default:
+        logApp("[App] Video format preference -> Auto");
+        break;
+    }
+
+    restartVideoCapture();
     requestImmediateRender();
 }
 
@@ -1130,6 +1116,7 @@ void Application::restartVideoCapture()
         options.enableAudio = audioEnabled_;
         options.desiredWidth = settings_.videoPreferredWidth;
         options.desiredHeight = settings_.videoPreferredHeight;
+        options.videoFormatPreference = toCaptureVideoFormat(settings_.videoFormatPreference);
         directShowCapture_.start([this](const DirectShowCapture::Frame& frame) {
             handleFrame(frame);
         }, options);

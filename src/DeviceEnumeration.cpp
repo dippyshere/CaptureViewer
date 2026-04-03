@@ -12,7 +12,10 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <fstream>
+#include <iomanip>
 #include <map>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -21,6 +24,48 @@
 namespace
 {
     using Microsoft::WRL::ComPtr;
+
+    void logFormatEnum(const std::string& message)
+    {
+        std::ofstream("pckvm.log", std::ios::app) << "[FormatEnum] " << message << '\n';
+    }
+
+    std::string guidToString(const GUID& guid)
+    {
+        std::ostringstream oss;
+        oss << std::hex << std::setfill('0')
+            << std::setw(8) << static_cast<unsigned long>(guid.Data1) << "-"
+            << std::setw(4) << static_cast<unsigned int>(guid.Data2) << "-"
+            << std::setw(4) << static_cast<unsigned int>(guid.Data3) << "-"
+            << std::setw(2) << static_cast<unsigned int>(guid.Data4[0])
+            << std::setw(2) << static_cast<unsigned int>(guid.Data4[1]) << "-"
+            << std::setw(2) << static_cast<unsigned int>(guid.Data4[2])
+            << std::setw(2) << static_cast<unsigned int>(guid.Data4[3])
+            << std::setw(2) << static_cast<unsigned int>(guid.Data4[4])
+            << std::setw(2) << static_cast<unsigned int>(guid.Data4[5])
+            << std::setw(2) << static_cast<unsigned int>(guid.Data4[6])
+            << std::setw(2) << static_cast<unsigned int>(guid.Data4[7]);
+        return oss.str();
+    }
+
+    const char* mediaSubtypeName(const GUID& subtype)
+    {
+        if (InlineIsEqualGUID(subtype, MEDIASUBTYPE_RGB24)) return "RGB24";
+        if (InlineIsEqualGUID(subtype, MEDIASUBTYPE_RGB32)) return "RGB32";
+        if (InlineIsEqualGUID(subtype, MEDIASUBTYPE_ARGB32)) return "ARGB32";
+        if (InlineIsEqualGUID(subtype, MEDIASUBTYPE_NV12)) return "NV12";
+        if (InlineIsEqualGUID(subtype, MEDIASUBTYPE_YUY2)) return "YUY2";
+        if (InlineIsEqualGUID(subtype, MEDIASUBTYPE_P010)) return "P010";
+        if (InlineIsEqualGUID(subtype, MEDIASUBTYPE_MJPG)) return "MJPG";
+        return "UNKNOWN";
+    }
+
+    bool isXrgbCompatibleSubtype(const GUID& subtype)
+    {
+        return InlineIsEqualGUID(subtype, MEDIASUBTYPE_RGB24) ||
+               InlineIsEqualGUID(subtype, MEDIASUBTYPE_RGB32) ||
+               InlineIsEqualGUID(subtype, MEDIASUBTYPE_ARGB32);
+    }
 
     class ScopedCoInit
     {
@@ -307,4 +352,131 @@ std::vector<VideoModeInfo> enumerateVideoModes(const std::string& monikerDisplay
     });
 
     return modes;
+}
+
+std::vector<VideoFormatPreference> enumerateVideoFormats(const std::string& monikerDisplayName)
+{
+    std::vector<VideoFormatPreference> formats;
+    if (monikerDisplayName.empty())
+    {
+        return formats;
+    }
+
+    logFormatEnum("Enumerating formats for device moniker: " + monikerDisplayName);
+
+    ScopedCoInit coInit(COINIT_MULTITHREADED);
+
+    ComPtr<IGraphBuilder> graph;
+    if (FAILED(CoCreateInstance(CLSID_FilterGraph, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&graph))))
+    {
+        return formats;
+    }
+
+    ComPtr<ICaptureGraphBuilder2> builder;
+    if (FAILED(CoCreateInstance(CLSID_CaptureGraphBuilder2, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&builder))))
+    {
+        return formats;
+    }
+
+    if (FAILED(builder->SetFiltergraph(graph.Get())))
+    {
+        return formats;
+    }
+
+    const std::wstring monikerWide = utf8ToWide(monikerDisplayName);
+    if (monikerWide.empty())
+    {
+        return formats;
+    }
+
+    ComPtr<IBindCtx> bindCtx;
+    if (FAILED(CreateBindCtx(0, &bindCtx)))
+    {
+        return formats;
+    }
+
+    ULONG eaten = 0;
+    ComPtr<IMoniker> moniker;
+    if (FAILED(MkParseDisplayName(bindCtx.Get(), monikerWide.c_str(), &eaten, moniker.GetAddressOf())) || !moniker)
+    {
+        return formats;
+    }
+
+    ComPtr<IBaseFilter> captureFilter;
+    if (FAILED(moniker->BindToObject(nullptr, nullptr, IID_PPV_ARGS(&captureFilter))) || !captureFilter)
+    {
+        return formats;
+    }
+
+    if (FAILED(graph->AddFilter(captureFilter.Get(), L"Source")))
+    {
+        return formats;
+    }
+
+    ComPtr<IAMStreamConfig> streamConfig;
+    HRESULT hr = builder->FindInterface(&PIN_CATEGORY_CAPTURE,
+                                        &MEDIATYPE_Video,
+                                        captureFilter.Get(),
+                                        IID_PPV_ARGS(streamConfig.GetAddressOf()));
+    if (FAILED(hr) || !streamConfig)
+    {
+        hr = builder->FindInterface(&PIN_CATEGORY_PREVIEW,
+                                    &MEDIATYPE_Video,
+                                    captureFilter.Get(),
+                                    IID_PPV_ARGS(streamConfig.GetAddressOf()));
+    }
+
+    if (FAILED(hr) || !streamConfig)
+    {
+        return formats;
+    }
+
+    int capabilityCount = 0;
+    int capabilitySize = 0;
+    if (FAILED(streamConfig->GetNumberOfCapabilities(&capabilityCount, &capabilitySize)) || capabilityCount <= 0 || capabilitySize <= 0)
+    {
+        return formats;
+    }
+
+    bool hasXrgb = false;
+    bool hasNv12 = false;
+    std::vector<std::uint8_t> capabilityBuffer(static_cast<std::size_t>(capabilitySize));
+
+    for (int i = 0; i < capabilityCount; ++i)
+    {
+        AM_MEDIA_TYPE* mediaType = nullptr;
+        if (FAILED(streamConfig->GetStreamCaps(i, &mediaType, capabilityBuffer.data())) || !mediaType)
+        {
+            logFormatEnum("cap[" + std::to_string(i) + "]: GetStreamCaps failed");
+            continue;
+        }
+
+        if (isXrgbCompatibleSubtype(mediaType->subtype))
+        {
+            hasXrgb = true;
+        }
+        else if (InlineIsEqualGUID(mediaType->subtype, MEDIASUBTYPE_NV12))
+        {
+            hasNv12 = true;
+        }
+
+        freeMediaType(*mediaType);
+        CoTaskMemFree(mediaType);
+    }
+
+    if (hasXrgb)
+    {
+        formats.push_back(VideoFormatPreference::XRGB);
+    }
+    if (hasNv12)
+    {
+        formats.push_back(VideoFormatPreference::NV12);
+    }
+
+    if (formats.empty())
+    {
+        formats.push_back(VideoFormatPreference::Auto);
+    }
+
+    return formats;
 }

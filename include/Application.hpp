@@ -5,7 +5,6 @@
 #include "DirectShowCapture.hpp"
 #include "D3DRenderer.hpp"
 #include "Settings.hpp"
-#include "InputCapture.hpp"
 #include "AudioPlayback.hpp"
 #include "OverlayUI.hpp"
 #include "DeviceEnumeration.hpp"
@@ -41,7 +40,6 @@ private:
     void loadPersistentSettings();
     void savePersistentSettings();
     void showSettingsMenu();
-    bool isMenuHotkeySatisfied() const;
     void applyAudioPlaybackSetting();
     void restartVideoCapture();
     bool shouldUseVideoAudio() const;
@@ -59,6 +57,7 @@ private:
     void setVideoResolution(std::uint32_t width, std::uint32_t height);
     void setVideoAllowResizing(bool enabled);
     void setVideoAspectMode(VideoAspectMode mode);
+    void setVideoFormatPreference(VideoFormatPreference preference);
     void requestImmediateRender();
     void processPendingSourceDimensions();
     static std::string toLowerCopy(const std::string& text);
@@ -81,15 +80,11 @@ private:
     bool classRegistered_ = false;
     bool audioEnabled_ = false;
 
-    InputCaptureManager inputCaptureManager_;
     AudioPlayback audioPlayback_;
     OverlayUI overlay_;
 
     SettingsManager settingsManager_;
     AppSettings settings_{};
-    unsigned int menuHotkeyId_ = 1;
-    DWORD ignoreMenuHotkeyUntil_ = 0;
-    bool menuHotkeyRegistered_ = false;
     std::atomic<std::uint32_t> pendingSourceWidth_{0};
     std::atomic<std::uint32_t> pendingSourceHeight_{0};
     std::atomic<bool> sourceChangePending_{false};

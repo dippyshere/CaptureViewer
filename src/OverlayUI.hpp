@@ -36,6 +36,7 @@ private:
     void showMenu(Application& app);
     void refreshDeviceLists(Application& app);
     void refreshVideoModes(Application& app);
+    void refreshVideoFormats(Application& app);
     void drawMenuWindow(Application& app);
 
     HWND hwnd_ = nullptr;
@@ -53,4 +54,5 @@ private:
     std::vector<VideoDeviceInfo> videoDevices_;
     std::vector<AudioCaptureDeviceInfo> audioDevices_;
     std::vector<VideoModeInfo> videoModes_;
+    std::vector<VideoFormatPreference> videoFormats_;
 };
