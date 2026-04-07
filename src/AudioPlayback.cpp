@@ -1,7 +1,10 @@
 #include "AudioPlayback.hpp"
 
 #include <algorithm>
+#include <cctype>
+#include <cwctype>
 #include <fstream>
+#include <utility>
 
 namespace
 {
@@ -10,6 +13,44 @@ namespace
     void logAudio(const std::string& message)
     {
         std::ofstream("pckvm.log", std::ios::app) << message << '\n';
+    }
+
+    std::wstring toLowerCopy(std::wstring text)
+    {
+        std::transform(text.begin(), text.end(), text.begin(), [](wchar_t ch) {
+            return static_cast<wchar_t>(std::towlower(ch));
+        });
+        return text;
+    }
+
+    std::wstring extractVidPidToken(const std::wstring& moniker)
+    {
+        const std::wstring lower = toLowerCopy(moniker);
+        const std::size_t vidPos = lower.find(L"vid_");
+        if (vidPos == std::wstring::npos || vidPos + 8 > lower.size())
+        {
+            return {};
+        }
+
+        const std::size_t pidPos = lower.find(L"&pid_", vidPos + 4);
+        if (pidPos == std::wstring::npos || pidPos + 9 > lower.size())
+        {
+            return {};
+        }
+
+        std::size_t end = pidPos + 9;
+        while (end < lower.size())
+        {
+            const wchar_t ch = lower[end];
+            if ((ch >= L'0' && ch <= L'9') || (ch >= L'a' && ch <= L'f'))
+            {
+                ++end;
+                continue;
+            }
+            break;
+        }
+
+        return lower.substr(vidPos, end - vidPos);
     }
 }
 
@@ -150,87 +191,205 @@ bool AudioPlayback::selectDevice(const std::wstring& requestedMoniker)
         return false;
     }
 
-    ComPtr<IEnumMoniker> enumMoniker;
-    hr = devEnum->CreateClassEnumerator(CLSID_AudioInputDeviceCategory, enumMoniker.GetAddressOf(), 0);
-    if (hr != S_OK || !enumMoniker)
+    struct SelectedDevice
     {
-        logAudio("[Audio] No audio capture devices were found");
-        return false;
-    }
-
-    ComPtr<IMoniker> matched;
-    std::wstring matchedFriendly;
-    std::wstring matchedDisplay;
-
-    ComPtr<IMoniker> fallback;
-    std::wstring fallbackFriendly;
-    std::wstring fallbackDisplay;
-
-    ComPtr<IMoniker> current;
-    ULONG fetched = 0;
-
-    while (enumMoniker->Next(1, current.GetAddressOf(), &fetched) == S_OK)
-    {
-        std::wstring displayName;
-        {
-            LPOLESTR name = nullptr;
-            if (SUCCEEDED(current->GetDisplayName(nullptr, nullptr, &name)) && name)
-            {
-                displayName.assign(name);
-                CoTaskMemFree(name);
-            }
-        }
-
+        ComPtr<IMoniker> moniker;
         std::wstring friendly;
-        ComPtr<IPropertyBag> bag;
-        if (SUCCEEDED(current->BindToStorage(nullptr, nullptr, IID_PPV_ARGS(&bag))) && bag)
-        {
-            VARIANT value;
-            VariantInit(&value);
-            if (SUCCEEDED(bag->Read(L"FriendlyName", &value, nullptr)) && value.vt == VT_BSTR)
-            {
-                friendly.assign(value.bstrVal, SysStringLen(value.bstrVal));
-            }
-            VariantClear(&value);
-        }
+        std::wstring display;
+        bool exactMatch = false;
+        bool hasAny = false;
+    };
 
-        const bool matches = !requestedMoniker.empty() &&
-            ((!displayName.empty() && displayName == requestedMoniker) || (!friendly.empty() && friendly == requestedMoniker));
-
-        if (matches)
-        {
-            matched = current;
-            matchedFriendly = friendly;
-            matchedDisplay = displayName;
-            break;
-        }
-
-        if (!fallback)
-        {
-            fallback = current;
-            fallbackFriendly = friendly;
-            fallbackDisplay = displayName;
-        }
-
-        current.Reset();
-    }
-
-    if (!matched)
+    auto enumerateCategory = [&](REFCLSID category) -> SelectedDevice
     {
-        matched = fallback;
-        matchedFriendly = fallbackFriendly;
-        matchedDisplay = fallbackDisplay;
+        SelectedDevice result;
+
+        ComPtr<IEnumMoniker> enumMoniker;
+        hr = devEnum->CreateClassEnumerator(category, enumMoniker.GetAddressOf(), 0);
+        if (hr != S_OK || !enumMoniker)
+        {
+            return result;
+        }
+
+        ComPtr<IMoniker> fallback;
+        std::wstring fallbackFriendly;
+        std::wstring fallbackDisplay;
+
+        ComPtr<IMoniker> current;
+        ULONG fetched = 0;
+        while (enumMoniker->Next(1, current.GetAddressOf(), &fetched) == S_OK)
+        {
+            std::wstring displayName;
+            {
+                LPOLESTR name = nullptr;
+                if (SUCCEEDED(current->GetDisplayName(nullptr, nullptr, &name)) && name)
+                {
+                    displayName.assign(name);
+                    CoTaskMemFree(name);
+                }
+            }
+
+            std::wstring friendly;
+            ComPtr<IPropertyBag> bag;
+            if (SUCCEEDED(current->BindToStorage(nullptr, nullptr, IID_PPV_ARGS(&bag))) && bag)
+            {
+                VARIANT value;
+                VariantInit(&value);
+                if (SUCCEEDED(bag->Read(L"FriendlyName", &value, nullptr)) && value.vt == VT_BSTR)
+                {
+                    friendly.assign(value.bstrVal, SysStringLen(value.bstrVal));
+                }
+                VariantClear(&value);
+            }
+
+            if (!requestedMoniker.empty() &&
+                ((!displayName.empty() && displayName == requestedMoniker) || (!friendly.empty() && friendly == requestedMoniker)))
+            {
+                result.moniker = current;
+                result.friendly = friendly;
+                result.display = displayName;
+                result.exactMatch = true;
+                result.hasAny = true;
+                return result;
+            }
+
+            if (!fallback)
+            {
+                fallback = current;
+                fallbackFriendly = friendly;
+                fallbackDisplay = displayName;
+            }
+
+            current.Reset();
+        }
+
+        if (fallback)
+        {
+            result.moniker = fallback;
+            result.friendly = fallbackFriendly;
+            result.display = fallbackDisplay;
+            result.hasAny = true;
+        }
+
+        return result;
+    };
+
+    auto findAudioByVidPid = [&](const std::wstring& vidPidToken) -> SelectedDevice
+    {
+        SelectedDevice result;
+        if (vidPidToken.empty())
+        {
+            return result;
+        }
+
+        ComPtr<IEnumMoniker> enumMoniker;
+        hr = devEnum->CreateClassEnumerator(CLSID_AudioInputDeviceCategory, enumMoniker.GetAddressOf(), 0);
+        if (hr != S_OK || !enumMoniker)
+        {
+            return result;
+        }
+
+        ComPtr<IMoniker> current;
+        ULONG fetched = 0;
+        while (enumMoniker->Next(1, current.GetAddressOf(), &fetched) == S_OK)
+        {
+            std::wstring displayName;
+            {
+                LPOLESTR name = nullptr;
+                if (SUCCEEDED(current->GetDisplayName(nullptr, nullptr, &name)) && name)
+                {
+                    displayName.assign(name);
+                    CoTaskMemFree(name);
+                }
+            }
+
+            std::wstring friendly;
+            ComPtr<IPropertyBag> bag;
+            if (SUCCEEDED(current->BindToStorage(nullptr, nullptr, IID_PPV_ARGS(&bag))) && bag)
+            {
+                VARIANT value;
+                VariantInit(&value);
+                if (SUCCEEDED(bag->Read(L"FriendlyName", &value, nullptr)) && value.vt == VT_BSTR)
+                {
+                    friendly.assign(value.bstrVal, SysStringLen(value.bstrVal));
+                }
+                VariantClear(&value);
+            }
+
+            const std::wstring displayLower = toLowerCopy(displayName);
+            const std::wstring friendlyLower = toLowerCopy(friendly);
+            if ((!displayLower.empty() && displayLower.find(vidPidToken) != std::wstring::npos) ||
+                (!friendlyLower.empty() && friendlyLower.find(vidPidToken) != std::wstring::npos))
+            {
+                result.moniker = current;
+                result.friendly = friendly;
+                result.display = displayName;
+                result.exactMatch = true;
+                result.hasAny = true;
+                return result;
+            }
+
+            current.Reset();
+        }
+
+        return result;
+    };
+
+    SelectedDevice audioCandidate = enumerateCategory(CLSID_AudioInputDeviceCategory);
+    if (audioCandidate.exactMatch)
+    {
+        selectedMoniker_ = audioCandidate.moniker;
+        selectedFriendlyName_ = audioCandidate.friendly;
+        selectedDisplayName_ = audioCandidate.display;
+        if (selectedFriendlyName_.empty())
+        {
+            selectedFriendlyName_ = selectedDisplayName_;
+        }
+        return true;
     }
 
-    if (!matched)
+    if (!requestedMoniker.empty())
+    {
+        SelectedDevice videoCandidate = enumerateCategory(CLSID_VideoInputDeviceCategory);
+        if (videoCandidate.exactMatch)
+        {
+            const std::wstring vidPid = extractVidPidToken(videoCandidate.display);
+            SelectedDevice pairedAudio = findAudioByVidPid(vidPid);
+            if (pairedAudio.moniker)
+            {
+                audioCandidate = std::move(pairedAudio);
+                logAudio("[Audio] Selected paired audio-input device for requested video source");
+            }
+            else
+            {
+                audioCandidate = std::move(videoCandidate);
+            }
+        }
+        else
+        {
+            logAudio("[Audio] Requested audio device not found by moniker/friendly name");
+            return false;
+        }
+    }
+
+    if (requestedMoniker.empty() && !audioCandidate.hasAny)
+    {
+        SelectedDevice videoFallback = enumerateCategory(CLSID_VideoInputDeviceCategory);
+        if (videoFallback.hasAny)
+        {
+            audioCandidate = std::move(videoFallback);
+        }
+    }
+
+    if (!audioCandidate.moniker)
     {
         logAudio("[Audio] Unable to select an audio capture device");
         return false;
     }
 
-    selectedMoniker_ = matched;
-    selectedFriendlyName_ = matchedFriendly;
-    selectedDisplayName_ = matchedDisplay;
+    selectedMoniker_ = audioCandidate.moniker;
+    selectedFriendlyName_ = audioCandidate.friendly;
+    selectedDisplayName_ = audioCandidate.display;
     if (selectedFriendlyName_.empty())
     {
         selectedFriendlyName_ = selectedDisplayName_;
@@ -241,7 +400,15 @@ bool AudioPlayback::selectDevice(const std::wstring& requestedMoniker)
 
 bool AudioPlayback::buildGraph()
 {
+    const ComPtr<IMoniker> selectedMoniker = selectedMoniker_;
+    const std::wstring selectedFriendlyName = selectedFriendlyName_;
+    const std::wstring selectedDisplayName = selectedDisplayName_;
+
     releaseGraph();
+
+    selectedMoniker_ = selectedMoniker;
+    selectedFriendlyName_ = selectedFriendlyName;
+    selectedDisplayName_ = selectedDisplayName;
 
     HRESULT hr = CoCreateInstance(CLSID_FilterGraph, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&graph_));
     if (FAILED(hr))
@@ -288,11 +455,48 @@ bool AudioPlayback::buildGraph()
 
     sourceFilter_ = filter;
 
-    hr = builder_->RenderStream(&PIN_CATEGORY_CAPTURE, &MEDIATYPE_Audio, sourceFilter_.Get(), nullptr, nullptr);
+    ComPtr<IBaseFilter> dsoundRenderer;
+    bool hasDirectSoundRenderer = false;
+    hr = CoCreateInstance(CLSID_DSoundRender, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dsoundRenderer));
+    if (SUCCEEDED(hr) && dsoundRenderer)
+    {
+        hr = graph_->AddFilter(dsoundRenderer.Get(), L"DirectSound Audio Renderer");
+        if (SUCCEEDED(hr))
+        {
+            hasDirectSoundRenderer = true;
+            logAudio("[Audio] Using DirectSound renderer for lower-latency monitoring");
+        }
+    }
+
+    hr = E_FAIL;
+    if (hasDirectSoundRenderer)
+    {
+        hr = builder_->RenderStream(&PIN_CATEGORY_PREVIEW, &MEDIATYPE_Audio, sourceFilter_.Get(), nullptr, dsoundRenderer.Get());
+        if (FAILED(hr))
+        {
+            hr = builder_->RenderStream(&PIN_CATEGORY_CAPTURE, &MEDIATYPE_Audio, sourceFilter_.Get(), nullptr, dsoundRenderer.Get());
+        }
+    }
+
+    if (FAILED(hr))
+    {
+        hr = builder_->RenderStream(&PIN_CATEGORY_PREVIEW, &MEDIATYPE_Audio, sourceFilter_.Get(), nullptr, nullptr);
+        if (FAILED(hr))
+        {
+            hr = builder_->RenderStream(&PIN_CATEGORY_CAPTURE, &MEDIATYPE_Audio, sourceFilter_.Get(), nullptr, nullptr);
+        }
+    }
+
     if (FAILED(hr))
     {
         logAudio("[Audio] Failed to render audio stream");
         return false;
+    }
+
+    ComPtr<IMediaFilter> mediaFilter;
+    if (SUCCEEDED(graph_->QueryInterface(IID_PPV_ARGS(&mediaFilter))) && mediaFilter)
+    {
+        mediaFilter->SetSyncSource(nullptr);
     }
 
     hr = graph_->QueryInterface(IID_PPV_ARGS(&control_));
