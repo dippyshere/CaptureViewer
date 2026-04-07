@@ -237,7 +237,7 @@ void OverlayUI::drawMenuWindow(Application& app)
     ImGui::PopStyleVar(2);
 
     const float panelWidth = 460.0f;
-    const float panelHeight = 520.0f;
+    const float panelHeight = 720.0f;
     ImVec2 panelPos((io.DisplaySize.x - panelWidth) * 0.5f, (io.DisplaySize.y - panelHeight) * 0.5f);
     ImGui::SetNextWindowPos(panelPos, ImGuiCond_Always);
     ImGui::SetNextWindowSize(ImVec2(panelWidth, panelHeight));
@@ -273,6 +273,18 @@ void OverlayUI::drawMenuWindow(Application& app)
     if (ImGui::Checkbox("Allow Resizing", &allowResizing))
     {
         app.setVideoAllowResizing(allowResizing);
+    }
+
+    bool borderlessWindowed = app.settings().videoBorderlessWindowed;
+    if (ImGui::Checkbox("Borderless Windowed", &borderlessWindowed))
+    {
+        app.setBorderlessWindowed(borderlessWindowed);
+    }
+
+    bool fullscreen = app.settings().videoFullscreen;
+    if (ImGui::Checkbox("Fullscreen", &fullscreen))
+    {
+        app.setFullscreen(fullscreen);
     }
 
     static const char* aspectOptions[] = {"Stretch", "Force Aspect Ratio", "Force Capture Resolution"};

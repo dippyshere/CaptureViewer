@@ -23,6 +23,8 @@ struct AppSettings {
     unsigned int videoPreferredWidth = 0;
     unsigned int videoPreferredHeight = 0;
     bool videoAllowResizing = true;
+    bool videoBorderlessWindowed = true;
+    bool videoFullscreen = false;
     VideoAspectMode videoAspectMode = VideoAspectMode::Maintain;
     VideoFormatPreference videoFormatPreference = VideoFormatPreference::XRGB;
 };

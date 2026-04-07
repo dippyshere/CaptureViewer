@@ -323,7 +323,7 @@ bool Application::createWindow(int width, int height)
     }
     classRegistered_ = true;
 
-    DWORD style = WS_POPUP | WS_VISIBLE;
+    DWORD style = (settings_.videoFullscreen || settings_.videoBorderlessWindowed) ? (WS_POPUP | WS_VISIBLE) : (WS_OVERLAPPEDWINDOW | WS_VISIBLE);
     RECT rect{0, 0, width, height};
     AdjustWindowRect(&rect, style, FALSE);
 
@@ -694,7 +694,7 @@ void Application::setVideoAllowResizing(bool enabled)
     logApp(std::string("[App] Video allow resizing -> ") + (settings_.videoAllowResizing ? "enabled" : "disabled"));
     updateWindowResizeMode();
 
-    if (!settings_.videoAllowResizing)
+    if (!settings_.videoAllowResizing && !settings_.videoFullscreen)
     {
         const std::uint32_t srcW = currentSourceWidth_.load(std::memory_order_acquire);
         const std::uint32_t srcH = currentSourceHeight_.load(std::memory_order_acquire);
@@ -758,6 +758,34 @@ void Application::setVideoFormatPreference(VideoFormatPreference preference)
     }
 
     restartVideoCapture();
+    requestImmediateRender();
+}
+
+void Application::setBorderlessWindowed(bool enabled)
+{
+    if (settings_.videoBorderlessWindowed == enabled)
+    {
+        return;
+    }
+
+    settings_.videoBorderlessWindowed = enabled;
+    savePersistentSettings();
+    logApp(std::string("[App] Borderless windowed -> ") + (settings_.videoBorderlessWindowed ? "enabled" : "disabled"));
+    updateWindowResizeMode();
+    requestImmediateRender();
+}
+
+void Application::setFullscreen(bool enabled)
+{
+    if (settings_.videoFullscreen == enabled)
+    {
+        return;
+    }
+
+    settings_.videoFullscreen = enabled;
+    savePersistentSettings();
+    logApp(std::string("[App] Fullscreen -> ") + (settings_.videoFullscreen ? "enabled" : "disabled"));
+    updateWindowResizeMode();
     requestImmediateRender();
 }
 
@@ -861,7 +889,7 @@ void Application::applySourceDimensions(std::uint32_t width, std::uint32_t heigh
     lockedClientWidth_ = static_cast<int>(width);
     lockedClientHeight_ = static_cast<int>(height);
 
-    if (hwnd_)
+    if (hwnd_ && !settings_.videoFullscreen)
     {
         resizeWindowToClient(static_cast<int>(width), static_cast<int>(height));
         updateWindowResizeMode();
@@ -933,25 +961,43 @@ void Application::updateWindowResizeMode()
         return;
     }
 
-    LONG_PTR style = GetWindowLongPtr(hwnd_, GWL_STYLE);
-    if (style == 0)
+    const bool fullscreen = settings_.videoFullscreen;
+    const bool borderlessWindowed = settings_.videoBorderlessWindowed;
+    const LONG_PTR desiredStyle = (fullscreen || borderlessWindowed) ? (WS_POPUP | WS_VISIBLE) : (WS_OVERLAPPEDWINDOW | WS_VISIBLE);
+    const LONG_PTR currentStyle = GetWindowLongPtr(hwnd_, GWL_STYLE);
+    if (currentStyle != desiredStyle)
     {
+        SetWindowLongPtr(hwnd_, GWL_STYLE, desiredStyle);
+    }
+
+    if (fullscreen)
+    {
+        const HMONITOR monitor = MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST);
+        MONITORINFO monitorInfo{};
+        monitorInfo.cbSize = sizeof(monitorInfo);
+        if (monitor && GetMonitorInfoW(monitor, &monitorInfo))
+        {
+            SetWindowPos(hwnd_, HWND_TOPMOST,
+                         monitorInfo.rcMonitor.left,
+                         monitorInfo.rcMonitor.top,
+                         monitorInfo.rcMonitor.right - monitorInfo.rcMonitor.left,
+                         monitorInfo.rcMonitor.bottom - monitorInfo.rcMonitor.top,
+                         SWP_NOACTIVATE | SWP_FRAMECHANGED);
+        }
         return;
     }
 
-    const LONG_PTR desiredStyle = WS_POPUP | WS_VISIBLE;
+    SetWindowPos(hwnd_, HWND_NOTOPMOST, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOSENDCHANGING | SWP_FRAMECHANGED);
 
-    if (desiredStyle != style)
-    {
-        SetWindowLongPtr(hwnd_, GWL_STYLE, desiredStyle);
-        SetWindowPos(hwnd_, nullptr, 0, 0, 0, 0,
-                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
-    }
+    const int desiredWidth = lockedClientWidth_ > 0 ? lockedClientWidth_ : kDefaultWidth;
+    const int desiredHeight = lockedClientHeight_ > 0 ? lockedClientHeight_ : kDefaultHeight;
+    resizeWindowToClient(desiredWidth, desiredHeight);
 }
 
 bool Application::applyLockedWindowSize(MINMAXINFO* info) const
 {
-    if (!info || settings_.videoAllowResizing || !hwnd_ || lockedClientWidth_ <= 0 || lockedClientHeight_ <= 0)
+    if (!info || settings_.videoAllowResizing || settings_.videoFullscreen || !hwnd_ || lockedClientWidth_ <= 0 || lockedClientHeight_ <= 0)
     {
         return false;
     }
