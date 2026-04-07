@@ -137,29 +137,6 @@ float4 main(PSInput input) : SV_Target
     inline void logFailure(const char*, HRESULT) {}
     inline std::string wideToUtf8(const std::wstring&) { return {}; }
 #endif
-
-    bool enableDebugLayer(bool requested)
-    {
-        if (!requested)
-        {
-            return false;
-        }
-
-        ComPtr<ID3D12Debug> debugController;
-        if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController))))
-        {
-            debugController->EnableDebugLayer();
-#if PCKVM_RENDERER_LOGGING
-            logMessage("[Renderer] D3D12 debug layer enabled");
-#endif
-            return true;
-        }
-
-#if PCKVM_RENDERER_LOGGING
-        logMessage("[Renderer] D3D12 debug layer unavailable");
-#endif
-        return false;
-    }
 }
 
 #if PCKVM_RENDERER_LOGGING
@@ -213,16 +190,14 @@ D3DRenderer::~D3DRenderer()
     shutdown();
 }
 
-bool D3DRenderer::initialize(HWND hwnd, bool enableDebug)
+bool D3DRenderer::initialize(HWND hwnd)
 {
     if (hwnd == nullptr)
     {
         return false;
     }
 
-    debugLayerEnabled_ = enableDebugLayer(enableDebug);
-
-    if (!createDevice(hwnd, debugLayerEnabled_))
+    if (!createDevice(hwnd))
     {
         return false;
     }
@@ -297,9 +272,7 @@ void D3DRenderer::shutdown()
     backBufferWidth_ = backBufferHeight_ = 0;
     fenceValue_ = 1;
     allowTearing_ = false;
-    debugGradient_ = false;
     loggedGpuPixels_ = false;
-    debugLayerEnabled_ = false;
 }
 
 void D3DRenderer::onResize(UINT width, UINT height)
@@ -546,7 +519,7 @@ void D3DRenderer::render(const std::function<void(ID3D12GraphicsCommandList*)>& 
 
     if (frameLatencyWaitableObject_)
     {
-        WaitForSingleObjectEx(frameLatencyWaitableObject_, 0, TRUE);
+        WaitForSingleObjectEx(frameLatencyWaitableObject_, vsyncEnabled_ ? INFINITE : 0, TRUE);
     }
 
     const UINT backBufferIndex = swapChain_->GetCurrentBackBufferIndex();
@@ -661,7 +634,7 @@ void D3DRenderer::render(const std::function<void(ID3D12GraphicsCommandList*)>& 
     commandList_->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 
     commandList_->SetGraphicsRootSignature(rootSignature_.Get());
-    commandList_->SetPipelineState(debugGradient_ ? pipelineStateGradient_.Get() : pipelineState_.Get());
+    commandList_->SetPipelineState(pipelineState_.Get());
 
     ID3D12DescriptorHeap* heaps[] = {srvHeap_.Get(), samplerHeap_.Get()};
     commandList_->SetDescriptorHeaps(static_cast<UINT>(std::size(heaps)), heaps);
@@ -703,8 +676,8 @@ void D3DRenderer::render(const std::function<void(ID3D12GraphicsCommandList*)>& 
     ID3D12CommandList* const commandLists[] = {commandList_.Get()};
     commandQueue_->ExecuteCommandLists(1, commandLists);
 
-    const UINT syncInterval = allowTearing_ ? 0u : 1u;
-    const UINT presentFlags = allowTearing_ ? DXGI_PRESENT_ALLOW_TEARING : 0u;
+    const UINT syncInterval = vsyncEnabled_ ? 1u : (allowTearing_ ? 0u : 1u);
+    const UINT presentFlags = (!vsyncEnabled_ && allowTearing_) ? DXGI_PRESENT_ALLOW_TEARING : 0u;
     swapChain_->Present(syncInterval, presentFlags);
 
     const std::uint64_t fenceValue = fenceValue_++;
@@ -712,21 +685,10 @@ void D3DRenderer::render(const std::function<void(ID3D12GraphicsCommandList*)>& 
     frameContext.fenceValue = fenceValue;
 }
 
-void D3DRenderer::setDebugGradient(bool enable)
-{
-    debugGradient_ = enable;
-#if PCKVM_RENDERER_LOGGING
-    std::ostringstream oss;
-    oss << "[Renderer] Debug gradient " << (enable ? "enabled" : "disabled")
-        << " psoPtr=" << (enable ? pipelineStateGradient_.Get() : pipelineState_.Get());
-    logMessage(oss.str());
-#endif
-}
-
-bool D3DRenderer::createDevice(HWND, bool useDebugLayer)
+bool D3DRenderer::createDevice(HWND)
 {
     ComPtr<IDXGIFactory6> factory;
-    UINT factoryFlags = useDebugLayer ? DXGI_CREATE_FACTORY_DEBUG : 0;
+    UINT factoryFlags = 0;
 
     HRESULT hr = CreateDXGIFactory2(factoryFlags, IID_PPV_ARGS(factory.GetAddressOf()));
     if (FAILED(hr))
@@ -856,7 +818,7 @@ bool D3DRenderer::createDevice(HWND, bool useDebugLayer)
 bool D3DRenderer::createSwapChain(HWND hwnd)
 {
     ComPtr<IDXGIFactory6> factory;
-    UINT factoryFlags = debugLayerEnabled_ ? DXGI_CREATE_FACTORY_DEBUG : 0;
+    UINT factoryFlags = 0;
 
     HRESULT hr = CreateDXGIFactory2(factoryFlags, IID_PPV_ARGS(factory.GetAddressOf()));
     if (FAILED(hr))

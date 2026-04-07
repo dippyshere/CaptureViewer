@@ -14,7 +14,7 @@ public:
     D3DRenderer() = default;
     ~D3DRenderer();
 
-    bool initialize(HWND hwnd, bool enableDebug = false);
+    bool initialize(HWND hwnd);
     void shutdown();
 
     void onResize(UINT width, UINT height);
@@ -26,8 +26,8 @@ public:
 
     void render(const std::function<void(ID3D12GraphicsCommandList*)>& overlayCallback = nullptr);
 
-    void setDebugGradient(bool enable);
-    [[nodiscard]] bool debugGradientEnabled() const { return debugGradient_; }
+    void setVSyncEnabled(bool enable) { vsyncEnabled_ = enable; }
+    [[nodiscard]] bool vsyncEnabled() const { return vsyncEnabled_; }
 
     [[nodiscard]] ID3D12Device* device() const { return device_.Get(); }
     [[nodiscard]] ID3D12CommandQueue* commandQueue() const { return commandQueue_.Get(); }
@@ -48,7 +48,7 @@ private:
         std::uint64_t fenceValue = 0;
     };
 
-    bool createDevice(HWND hwnd, bool enableDebug);
+    bool createDevice(HWND hwnd);
     bool createSwapChain(HWND hwnd);
     bool createPipelineResources();
     bool createRenderTargets();
@@ -118,6 +118,7 @@ private:
 
     HANDLE frameLatencyWaitableObject_ = nullptr;
     bool allowTearing_ = false;
+    bool vsyncEnabled_ = false;
     bool debugGradient_ = false;
     bool loggedGpuPixels_ = false;
     bool debugLayerEnabled_ = false;

@@ -25,6 +25,7 @@ struct AppSettings {
     bool videoAllowResizing = true;
     bool videoBorderlessWindowed = true;
     bool videoFullscreen = false;
+    bool vsyncEnabled = false;
     VideoAspectMode videoAspectMode = VideoAspectMode::Maintain;
     VideoFormatPreference videoFormatPreference = VideoFormatPreference::XRGB;
 };

@@ -287,6 +287,12 @@ void OverlayUI::drawMenuWindow(Application& app)
         app.setFullscreen(fullscreen);
     }
 
+    bool vsyncEnabled = app.settings().vsyncEnabled;
+    if (ImGui::Checkbox("VSync", &vsyncEnabled))
+    {
+        app.setVSyncEnabled(vsyncEnabled);
+    }
+
     static const char* aspectOptions[] = {"Stretch", "Force Aspect Ratio", "Force Capture Resolution"};
     int currentAspect = static_cast<int>(app.settings().videoAspectMode);
     if (ImGui::Combo("Aspect Mode", &currentAspect, aspectOptions, IM_ARRAYSIZE(aspectOptions)))

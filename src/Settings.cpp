@@ -258,6 +258,7 @@ AppSettings SettingsManager::load()
     tryParseBool(content, "videoAllowResizing", settings.videoAllowResizing);
     tryParseBool(content, "videoBorderlessWindowed", settings.videoBorderlessWindowed);
     tryParseBool(content, "videoFullscreen", settings.videoFullscreen);
+    tryParseBool(content, "vsyncEnabled", settings.vsyncEnabled);
 
     if (settings.videoPreferredWidth == 0 || settings.videoPreferredHeight == 0)
     {
@@ -318,6 +319,7 @@ void SettingsManager::save(const AppSettings& settings) const
     file << "  \"videoAllowResizing\": " << (settings.videoAllowResizing ? "true" : "false") << ",\n";
     file << "  \"videoBorderlessWindowed\": " << (settings.videoBorderlessWindowed ? "true" : "false") << ",\n";
     file << "  \"videoFullscreen\": " << (settings.videoFullscreen ? "true" : "false") << ",\n";
+    file << "  \"vsyncEnabled\": " << (settings.vsyncEnabled ? "true" : "false") << ",\n";
     file << "  \"videoAspectMode\": " << static_cast<unsigned int>(settings.videoAspectMode) << ",\n";
     file << "  \"videoFormatPreference\": " << static_cast<unsigned int>(settings.videoFormatPreference) << "\n";
     file << "}\n";

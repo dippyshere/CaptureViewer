@@ -101,6 +101,8 @@ int Application::run()
         destroyWindow();
         return EXIT_FAILURE;
     }
+    renderer_.setVSyncEnabled(settings_.vsyncEnabled);
+    logApp(std::string("[App] VSync ") + (settings_.vsyncEnabled ? "enabled" : "disabled"));
     logApp("[App] Renderer initialized");
 
     if (!overlay_.initialize(hwnd_, renderer_))
@@ -758,6 +760,20 @@ void Application::setVideoFormatPreference(VideoFormatPreference preference)
     }
 
     restartVideoCapture();
+    requestImmediateRender();
+}
+
+void Application::setVSyncEnabled(bool enabled)
+{
+    if (settings_.vsyncEnabled == enabled)
+    {
+        return;
+    }
+
+    settings_.vsyncEnabled = enabled;
+    savePersistentSettings();
+    renderer_.setVSyncEnabled(enabled);
+    logApp(std::string("[App] VSync -> ") + (settings_.vsyncEnabled ? "enabled" : "disabled"));
     requestImmediateRender();
 }
 

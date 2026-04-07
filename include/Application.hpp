@@ -58,6 +58,7 @@ private:
     void setVideoAllowResizing(bool enabled);
     void setVideoAspectMode(VideoAspectMode mode);
     void setVideoFormatPreference(VideoFormatPreference preference);
+    void setVSyncEnabled(bool enabled);
     void setBorderlessWindowed(bool enabled);
     void setFullscreen(bool enabled);
     void requestImmediateRender();
