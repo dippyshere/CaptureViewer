@@ -27,7 +27,7 @@ struct AppSettings {
     bool videoFullscreen = false;
     bool vsyncEnabled = false;
     VideoAspectMode videoAspectMode = VideoAspectMode::Maintain;
-    VideoFormatPreference videoFormatPreference = VideoFormatPreference::XRGB;
+    VideoFormatPreference videoFormatPreference = VideoFormatPreference::Auto;
 };
 
 class SettingsManager {

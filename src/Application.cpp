@@ -858,6 +858,29 @@ void Application::renderFrame(bool forcePresent)
     overlay_.buildUI(*this);
     overlay_.endFrame();
 
+    if (hwnd_)
+    {
+        RECT clientRect{};
+        if (GetClientRect(hwnd_, &clientRect))
+        {
+            bool viewportValid = false;
+            const RECT viewport = computeVideoViewport(clientRect, viewportValid);
+            if (viewportValid)
+            {
+                renderer_.setViewportRect(static_cast<float>(viewport.left),
+                                          static_cast<float>(viewport.top),
+                                          static_cast<float>(viewport.right - viewport.left),
+                                          static_cast<float>(viewport.bottom - viewport.top));
+            }
+            else
+            {
+                renderer_.setViewportRect(0.0f, 0.0f,
+                                          static_cast<float>(clientRect.right - clientRect.left),
+                                          static_cast<float>(clientRect.bottom - clientRect.top));
+            }
+        }
+    }
+
     const bool uploaded = uploadLatestFrame();
     const bool forced = forcePresent || forceRender_.exchange(false, std::memory_order_acq_rel);
     const bool overlayHasDraw = overlay_.hasDrawData();
