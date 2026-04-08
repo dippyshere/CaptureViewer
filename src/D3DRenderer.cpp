@@ -517,11 +517,6 @@ void D3DRenderer::render(const std::function<void(ID3D12GraphicsCommandList*)>& 
         return;
     }
 
-    if (frameLatencyWaitableObject_)
-    {
-        WaitForSingleObjectEx(frameLatencyWaitableObject_, vsyncEnabled_ ? INFINITE : 0, TRUE);
-    }
-
     const UINT backBufferIndex = swapChain_->GetCurrentBackBufferIndex();
     FrameContext& frameContext = frameContexts_[backBufferIndex];
     waitForFrame(frameContext);

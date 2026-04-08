@@ -290,6 +290,12 @@ LRESULT CALLBACK Application::windowProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
         logApp("[App] WM_DESTROY received");
         PostQuitMessage(0);
         return 0;
+    case WM_SETCURSOR:
+        if (LOWORD(lParam) == HTCLIENT)
+        {
+            SetCursor(nullptr);
+            return TRUE;
+		}
     default:
         break;
     }
@@ -557,7 +563,6 @@ void Application::loadPersistentSettings()
     {
         settings_.audioDeviceMoniker = kAudioSourceVideoSentinel;
     }
-    settings_.mouseAbsoluteMode = true;
     audioEnabled_ = shouldEnableCaptureAudio();
 }
 
@@ -884,9 +889,13 @@ void Application::processPendingSourceDimensions()
 void Application::renderFrame(bool forcePresent)
 {
     processPendingSourceDimensions();
-    overlay_.newFrame();
-    overlay_.buildUI(*this);
-    overlay_.endFrame();
+    
+    if (overlay_.isMenuVisible())
+    {
+        overlay_.newFrame();
+        overlay_.buildUI(*this);
+        overlay_.endFrame();
+    }
 
     if (hwnd_)
     {

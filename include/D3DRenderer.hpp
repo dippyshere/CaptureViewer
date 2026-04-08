@@ -40,6 +40,8 @@ public:
     [[nodiscard]] UINT frameCount() const { return kFrameCount; }
     [[nodiscard]] UINT srvDescriptorSize() const { return srvDescriptorSize_; }
 
+    [[nodiscard]] HANDLE frameLatencyWaitableObject() const { return frameLatencyWaitableObject_; }
+
     void setViewportRect(float x, float y, float width, float height);
 
 private:

@@ -252,7 +252,6 @@ AppSettings SettingsManager::load()
     tryParseString(content, "videoDeviceMoniker", settings.videoDeviceMoniker);
     tryParseString(content, "audioDeviceMoniker", settings.audioDeviceMoniker);
     tryParseBool(content, "audioPlaybackEnabled", settings.audioPlaybackEnabled);
-    tryParseBool(content, "mouseAbsoluteMode", settings.mouseAbsoluteMode);
     tryParseUInt(content, "videoPreferredWidth", settings.videoPreferredWidth);
     tryParseUInt(content, "videoPreferredHeight", settings.videoPreferredHeight);
     tryParseUInt(content, "videoPreferredFrameRate100", settings.videoPreferredFrameRate100);
@@ -318,7 +317,6 @@ void SettingsManager::save(const AppSettings& settings) const
     file << "  \"videoDeviceMoniker\": \"" << escapeJson(settings.videoDeviceMoniker) << "\",\n";
     file << "  \"audioDeviceMoniker\": \"" << escapeJson(settings.audioDeviceMoniker) << "\",\n";
     file << "  \"audioPlaybackEnabled\": " << (settings.audioPlaybackEnabled ? "true" : "false") << ",\n";
-    file << "  \"mouseAbsoluteMode\": " << (settings.mouseAbsoluteMode ? "true" : "false") << ",\n";
     file << "  \"videoPreferredWidth\": " << settings.videoPreferredWidth << ",\n";
     file << "  \"videoPreferredHeight\": " << settings.videoPreferredHeight << ",\n";
     file << "  \"videoPreferredFrameRate100\": " << settings.videoPreferredFrameRate100 << ",\n";
