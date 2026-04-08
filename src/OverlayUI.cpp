@@ -340,35 +340,113 @@ void OverlayUI::drawMenuWindow(Application& app)
     std::string resolutionLabel;
     if (app.settings().videoPreferredWidth == 0 || app.settings().videoPreferredHeight == 0)
     {
-        resolutionLabel = "Auto (driver default)";
+        resolutionLabel = "1920x1080";
     }
     else
     {
         resolutionLabel = std::to_string(app.settings().videoPreferredWidth) + "x" + std::to_string(app.settings().videoPreferredHeight);
     }
 
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> resolutionOptions;
+    resolutionOptions.reserve(videoModes_.size());
+    for (const auto& mode : videoModes_)
+    {
+        const auto exists = std::find_if(resolutionOptions.begin(), resolutionOptions.end(), [&](const auto& entry) {
+            return entry.first == mode.width && entry.second == mode.height;
+        });
+        if (exists == resolutionOptions.end())
+        {
+            resolutionOptions.emplace_back(mode.width, mode.height);
+        }
+    }
+
     if (ImGui::BeginCombo("Capture Resolution", resolutionLabel.c_str()))
     {
-        const bool autoSelected = app.settings().videoPreferredWidth == 0 || app.settings().videoPreferredHeight == 0;
-        if (ImGui::Selectable("Auto (driver default)", autoSelected))
+        for (const auto& [width, height] : resolutionOptions)
         {
-            app.setVideoResolution(0, 0);
-        }
-
-        for (const auto& mode : videoModes_)
-        {
-            std::ostringstream oss;
-            oss << mode.width << "x" << mode.height;
-            if (mode.frameRate > 0.0)
-            {
-                oss << " @" << std::fixed << std::setprecision(2) << mode.frameRate << " Hz";
-            }
-            const std::string modeLabel = oss.str();
-            const bool selected = app.settings().videoPreferredWidth == mode.width &&
-                                  app.settings().videoPreferredHeight == mode.height;
+            const std::string modeLabel = std::to_string(width) + "x" + std::to_string(height);
+            const bool selected = app.settings().videoPreferredWidth == width &&
+                                  app.settings().videoPreferredHeight == height;
             if (ImGui::Selectable(modeLabel.c_str(), selected))
             {
-                app.setVideoResolution(mode.width, mode.height);
+                app.setVideoResolution(width, height);
+
+                std::vector<std::uint32_t> ratesForResolution;
+                for (const auto& candidate : videoModes_)
+                {
+                    if (candidate.width == width && candidate.height == height)
+                    {
+                        const std::uint32_t rate100 = static_cast<std::uint32_t>(std::llround(candidate.frameRate * 100.0));
+                        if (rate100 != 0 && std::find(ratesForResolution.begin(), ratesForResolution.end(), rate100) == ratesForResolution.end())
+                        {
+                            ratesForResolution.push_back(rate100);
+                        }
+                    }
+                }
+                if (!ratesForResolution.empty())
+                {
+                    std::sort(ratesForResolution.begin(), ratesForResolution.end());
+                    std::uint32_t preferred = ratesForResolution.front();
+                    if (std::find(ratesForResolution.begin(), ratesForResolution.end(), 6000) != ratesForResolution.end())
+                    {
+                        preferred = 6000;
+                    }
+                    else if (std::find(ratesForResolution.begin(), ratesForResolution.end(), app.settings().videoPreferredFrameRate100) != ratesForResolution.end())
+                    {
+                        preferred = app.settings().videoPreferredFrameRate100;
+                    }
+                    app.setVideoFrameRate100(preferred);
+                }
+            }
+        }
+
+        ImGui::EndCombo();
+    }
+
+    const std::uint32_t selectedWidth = app.settings().videoPreferredWidth;
+    const std::uint32_t selectedHeight = app.settings().videoPreferredHeight;
+    std::vector<std::uint32_t> refreshRateOptions100;
+    refreshRateOptions100.reserve(videoModes_.size());
+    for (const auto& mode : videoModes_)
+    {
+        if (mode.width == selectedWidth && mode.height == selectedHeight)
+        {
+            const std::uint32_t rate100 = static_cast<std::uint32_t>(std::llround(mode.frameRate * 100.0));
+            if (rate100 == 0)
+            {
+                continue;
+            }
+            if (std::find(refreshRateOptions100.begin(), refreshRateOptions100.end(), rate100) == refreshRateOptions100.end())
+            {
+                refreshRateOptions100.push_back(rate100);
+            }
+        }
+    }
+    std::sort(refreshRateOptions100.begin(), refreshRateOptions100.end());
+
+    const auto frameRateLabel = [&](std::uint32_t rate100) {
+        std::ostringstream oss;
+        oss << std::fixed << std::setprecision(2) << (static_cast<double>(rate100) / 100.0) << " Hz";
+        return oss.str();
+    };
+
+    std::string refreshLabel = frameRateLabel(app.settings().videoPreferredFrameRate100 != 0 ? app.settings().videoPreferredFrameRate100 : 6000);
+    if (ImGui::BeginCombo("Capture Refresh Rate", refreshLabel.c_str()))
+    {
+        if (refreshRateOptions100.empty())
+        {
+            ImGui::TextDisabled("No refresh rates detected for this resolution");
+        }
+        else
+        {
+            for (const std::uint32_t rate100 : refreshRateOptions100)
+            {
+                const std::string rateText = frameRateLabel(rate100);
+                const bool selected = app.settings().videoPreferredFrameRate100 == rate100;
+                if (ImGui::Selectable(rateText.c_str(), selected))
+                {
+                    app.setVideoFrameRate100(rate100);
+                }
             }
         }
 
@@ -429,9 +507,17 @@ void OverlayUI::drawMenuWindow(Application& app)
 
     const std::uint32_t signalWidth = app.currentCaptureWidth();
     const std::uint32_t signalHeight = app.currentCaptureHeight();
+    const std::uint32_t signalRate100 = app.currentCaptureFrameRate100();
     if (signalWidth != 0 && signalHeight != 0)
     {
-        ImGui::Text("Current Signal: %ux%u", signalWidth, signalHeight);
+        if (signalRate100 != 0)
+        {
+            ImGui::Text("Current Signal: %ux%u @ %.2f Hz", signalWidth, signalHeight, static_cast<double>(signalRate100) / 100.0);
+        }
+        else
+        {
+            ImGui::Text("Current Signal: %ux%u", signalWidth, signalHeight);
+        }
     }
     else
     {

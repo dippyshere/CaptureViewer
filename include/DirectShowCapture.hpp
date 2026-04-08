@@ -33,6 +33,7 @@ public:
         std::uint32_t contentTop{};
         std::uint32_t contentRight{};
         std::uint32_t contentBottom{};
+        std::uint32_t nominalFrameRate100{};
     };
 
     using FrameHandler = std::function<void(const Frame&)>;
@@ -42,6 +43,7 @@ public:
         bool enableAudio = false;
         std::uint32_t desiredWidth = 0;
         std::uint32_t desiredHeight = 0;
+        std::uint32_t desiredFrameRate100 = 0;
         VideoFormatPreference videoFormatPreference = VideoFormatPreference::XRGB;
     };
 

@@ -255,6 +255,7 @@ AppSettings SettingsManager::load()
     tryParseBool(content, "mouseAbsoluteMode", settings.mouseAbsoluteMode);
     tryParseUInt(content, "videoPreferredWidth", settings.videoPreferredWidth);
     tryParseUInt(content, "videoPreferredHeight", settings.videoPreferredHeight);
+    tryParseUInt(content, "videoPreferredFrameRate100", settings.videoPreferredFrameRate100);
     tryParseBool(content, "videoAllowResizing", settings.videoAllowResizing);
     tryParseBool(content, "videoBorderlessWindowed", settings.videoBorderlessWindowed);
     tryParseBool(content, "videoFullscreen", settings.videoFullscreen);
@@ -262,8 +263,12 @@ AppSettings SettingsManager::load()
 
     if (settings.videoPreferredWidth == 0 || settings.videoPreferredHeight == 0)
     {
-        settings.videoPreferredWidth = 0;
-        settings.videoPreferredHeight = 0;
+        settings.videoPreferredWidth = 1920;
+        settings.videoPreferredHeight = 1080;
+    }
+    if (settings.videoPreferredFrameRate100 == 0)
+    {
+        settings.videoPreferredFrameRate100 = 6000;
     }
 
     unsigned int aspectModeValue = static_cast<unsigned int>(settings.videoAspectMode);
@@ -316,6 +321,7 @@ void SettingsManager::save(const AppSettings& settings) const
     file << "  \"mouseAbsoluteMode\": " << (settings.mouseAbsoluteMode ? "true" : "false") << ",\n";
     file << "  \"videoPreferredWidth\": " << settings.videoPreferredWidth << ",\n";
     file << "  \"videoPreferredHeight\": " << settings.videoPreferredHeight << ",\n";
+    file << "  \"videoPreferredFrameRate100\": " << settings.videoPreferredFrameRate100 << ",\n";
     file << "  \"videoAllowResizing\": " << (settings.videoAllowResizing ? "true" : "false") << ",\n";
     file << "  \"videoBorderlessWindowed\": " << (settings.videoBorderlessWindowed ? "true" : "false") << ",\n";
     file << "  \"videoFullscreen\": " << (settings.videoFullscreen ? "true" : "false") << ",\n";

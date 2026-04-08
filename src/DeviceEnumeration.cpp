@@ -296,7 +296,7 @@ std::vector<VideoModeInfo> enumerateVideoModes(const std::string& monikerDisplay
     }
 
     std::vector<std::uint8_t> capabilityBuffer(static_cast<std::size_t>(capabilitySize));
-    std::map<std::pair<std::uint32_t, std::uint32_t>, double> uniqueModes;
+    std::vector<VideoModeInfo> uniqueModes;
 
     for (int i = 0; i < capabilityCount; ++i)
     {
@@ -317,11 +317,18 @@ std::vector<VideoModeInfo> enumerateVideoModes(const std::string& monikerDisplay
                 frameRate = 10'000'000.0 / static_cast<double>(vih->AvgTimePerFrame);
             }
 
-            auto key = std::make_pair(width, height);
-            auto existing = uniqueModes.find(key);
-            if (existing == uniqueModes.end() || frameRate > existing->second)
+            const auto alreadyExists = std::find_if(uniqueModes.begin(), uniqueModes.end(), [&](const VideoModeInfo& existing) {
+                return existing.width == width &&
+                       existing.height == height &&
+                       std::abs(existing.frameRate - frameRate) < 0.01;
+            });
+            if (alreadyExists == uniqueModes.end())
             {
-                uniqueModes[key] = frameRate;
+                VideoModeInfo mode;
+                mode.width = width;
+                mode.height = height;
+                mode.frameRate = frameRate;
+                uniqueModes.push_back(mode);
             }
         }
 
@@ -329,16 +336,7 @@ std::vector<VideoModeInfo> enumerateVideoModes(const std::string& monikerDisplay
         CoTaskMemFree(mediaType);
     }
 
-    modes.reserve(uniqueModes.size());
-    for (const auto& entry : uniqueModes)
-    {
-        VideoModeInfo mode;
-        mode.width = entry.first.first;
-        mode.height = entry.first.second;
-        mode.frameRate = entry.second;
-        modes.push_back(mode);
-    }
-
+    modes = std::move(uniqueModes);
     std::sort(modes.begin(), modes.end(), [](const VideoModeInfo& a, const VideoModeInfo& b) {
         if (a.width != b.width)
         {
@@ -348,7 +346,7 @@ std::vector<VideoModeInfo> enumerateVideoModes(const std::string& monikerDisplay
         {
             return a.height > b.height;
         }
-        return a.frameRate > b.frameRate;
+        return a.frameRate < b.frameRate;
     });
 
     return modes;

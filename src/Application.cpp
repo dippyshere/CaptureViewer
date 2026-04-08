@@ -122,6 +122,7 @@ int Application::run()
         captureOptions.enableAudio = audioEnabled_;
         captureOptions.desiredWidth = settings_.videoPreferredWidth;
         captureOptions.desiredHeight = settings_.videoPreferredHeight;
+        captureOptions.desiredFrameRate100 = settings_.videoPreferredFrameRate100;
         captureOptions.videoFormatPreference = toCaptureVideoFormat(settings_.videoFormatPreference);
 
         directShowCapture_.start([this](const DirectShowCapture::Frame& frame) {
@@ -428,10 +429,12 @@ void Application::handleFrame(const DirectShowCapture::Frame& frame)
 
     const std::uint32_t knownWidth = currentSourceWidth_.load(std::memory_order_acquire);
     const std::uint32_t knownHeight = currentSourceHeight_.load(std::memory_order_acquire);
-    if (frameWidth != knownWidth || frameHeight != knownHeight)
+    const std::uint32_t knownFrameRate100 = currentSourceFrameRate100_.load(std::memory_order_acquire);
+    if (frameWidth != knownWidth || frameHeight != knownHeight || frame.nominalFrameRate100 != knownFrameRate100)
     {
         pendingSourceWidth_.store(frameWidth, std::memory_order_release);
         pendingSourceHeight_.store(frameHeight, std::memory_order_release);
+        pendingSourceFrameRate100_.store(frame.nominalFrameRate100, std::memory_order_release);
         sourceChangePending_.store(true, std::memory_order_release);
     }
 
@@ -626,8 +629,9 @@ void Application::selectVideoDevice(const std::string& moniker)
     }
 
     settings_.videoDeviceMoniker = moniker;
-    settings_.videoPreferredWidth = 0;
-    settings_.videoPreferredHeight = 0;
+    settings_.videoPreferredWidth = 1920;
+    settings_.videoPreferredHeight = 1080;
+    settings_.videoPreferredFrameRate100 = 6000;
     savePersistentSettings();
     logApp(std::string("[App] Selected video capture device: ") + settings_.videoDeviceMoniker);
     restartVideoCapture();
@@ -642,8 +646,8 @@ void Application::setVideoResolution(std::uint32_t width, std::uint32_t height)
 {
     if (width == 0 || height == 0)
     {
-        width = 0;
-        height = 0;
+        width = 1920;
+        height = 1080;
     }
 
     if (settings_.videoPreferredWidth == width && settings_.videoPreferredHeight == height)
@@ -653,16 +657,36 @@ void Application::setVideoResolution(std::uint32_t width, std::uint32_t height)
 
     settings_.videoPreferredWidth = width;
     settings_.videoPreferredHeight = height;
+    if (settings_.videoPreferredFrameRate100 == 0)
+    {
+        settings_.videoPreferredFrameRate100 = 6000;
+    }
     savePersistentSettings();
 
-    if (width == 0 || height == 0)
+    logApp("[App] Video resolution preference -> " + std::to_string(width) + "x" + std::to_string(height));
+
+    restartVideoCapture();
+    requestImmediateRender();
+}
+
+void Application::setVideoFrameRate100(std::uint32_t frameRate100)
+{
+    if (frameRate100 == 0)
     {
-        logApp("[App] Video resolution preference -> auto");
+        frameRate100 = 6000;
     }
-    else
+
+    if (settings_.videoPreferredFrameRate100 == frameRate100)
     {
-        logApp("[App] Video resolution preference -> " + std::to_string(width) + "x" + std::to_string(height));
+        return;
     }
+
+    settings_.videoPreferredFrameRate100 = frameRate100;
+    savePersistentSettings();
+    std::ostringstream oss;
+    oss << "[App] Video frame-rate preference -> " << std::fixed << std::setprecision(2)
+        << (static_cast<double>(frameRate100) / 100.0) << " Hz";
+    logApp(oss.str());
 
     restartVideoCapture();
     requestImmediateRender();
@@ -844,9 +868,11 @@ void Application::processPendingSourceDimensions()
 
     const std::uint32_t newWidth = pendingSourceWidth_.load(std::memory_order_acquire);
     const std::uint32_t newHeight = pendingSourceHeight_.load(std::memory_order_acquire);
+    const std::uint32_t newFrameRate100 = pendingSourceFrameRate100_.load(std::memory_order_acquire);
     if (newWidth != 0 && newHeight != 0)
     {
         applySourceDimensions(newWidth, newHeight);
+        currentSourceFrameRate100_.store(newFrameRate100, std::memory_order_release);
     }
     sourceChangePending_.store(false, std::memory_order_release);
 }
@@ -1201,6 +1227,7 @@ void Application::restartVideoCapture()
         options.enableAudio = audioEnabled_;
         options.desiredWidth = settings_.videoPreferredWidth;
         options.desiredHeight = settings_.videoPreferredHeight;
+        options.desiredFrameRate100 = settings_.videoPreferredFrameRate100;
         options.videoFormatPreference = toCaptureVideoFormat(settings_.videoFormatPreference);
         directShowCapture_.start([this](const DirectShowCapture::Frame& frame) {
             handleFrame(frame);

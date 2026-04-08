@@ -55,6 +55,7 @@ private:
     void selectVideoDevice(const std::string& moniker);
     void selectAudioDevice(const std::string& moniker);
     void setVideoResolution(std::uint32_t width, std::uint32_t height);
+    void setVideoFrameRate100(std::uint32_t frameRate100);
     void setVideoAllowResizing(bool enabled);
     void setVideoAspectMode(VideoAspectMode mode);
     void setVideoFormatPreference(VideoFormatPreference preference);
@@ -69,6 +70,7 @@ private:
     const AppSettings& settings() const { return settings_; }
     std::uint32_t currentCaptureWidth() const { return currentSourceWidth_.load(std::memory_order_acquire); }
     std::uint32_t currentCaptureHeight() const { return currentSourceHeight_.load(std::memory_order_acquire); }
+    std::uint32_t currentCaptureFrameRate100() const { return currentSourceFrameRate100_.load(std::memory_order_acquire); }
 
     HWND hwnd_ = nullptr;
     D3DRenderer renderer_;
@@ -90,9 +92,11 @@ private:
     AppSettings settings_{};
     std::atomic<std::uint32_t> pendingSourceWidth_{0};
     std::atomic<std::uint32_t> pendingSourceHeight_{0};
+    std::atomic<std::uint32_t> pendingSourceFrameRate100_{0};
     std::atomic<bool> sourceChangePending_{false};
     std::atomic<std::uint32_t> currentSourceWidth_{0};
     std::atomic<std::uint32_t> currentSourceHeight_{0};
+    std::atomic<std::uint32_t> currentSourceFrameRate100_{0};
     int lockedClientWidth_ = 0;
     int lockedClientHeight_ = 0;
     std::atomic<bool> forceRender_{false};

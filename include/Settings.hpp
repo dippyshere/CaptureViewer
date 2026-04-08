@@ -20,8 +20,9 @@ struct AppSettings {
     std::string audioDeviceMoniker;
     bool audioPlaybackEnabled = true;
     bool mouseAbsoluteMode = true;
-    unsigned int videoPreferredWidth = 0;
-    unsigned int videoPreferredHeight = 0;
+    unsigned int videoPreferredWidth = 1920;
+    unsigned int videoPreferredHeight = 1080;
+    unsigned int videoPreferredFrameRate100 = 6000;
     bool videoAllowResizing = true;
     bool videoBorderlessWindowed = true;
     bool videoFullscreen = false;

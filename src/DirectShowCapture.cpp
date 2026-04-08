@@ -13,6 +13,7 @@
 #include <condition_variable>
 #include <exception>
 #include <fstream>
+#include <iomanip>
 #include <limits>
 #include <mutex>
 #include <sstream>
@@ -277,9 +278,11 @@ struct DirectShowCaptureImpl
     bool audioEnabled = false;
     std::uint32_t requestedWidth = 0;
     std::uint32_t requestedHeight = 0;
+    std::uint32_t requestedFrameRate100 = 0;
     DirectShowCapture::VideoFormatPreference requestedFormatPreference = DirectShowCapture::VideoFormatPreference::XRGB;
 
     ActiveSubtype activeSubtype = ActiveSubtype::Unknown;
+    std::uint32_t activeFrameRate100 = 0;
     std::vector<std::uint8_t> convertedBuffer;
 
     DirectShowCaptureImpl() = default;
@@ -303,6 +306,7 @@ struct DirectShowCaptureImpl
         audioEnabled = options.enableAudio;
         requestedWidth = options.desiredWidth;
         requestedHeight = options.desiredHeight;
+        requestedFrameRate100 = options.desiredFrameRate100;
         requestedFormatPreference = options.videoFormatPreference;
         activeSubtype = ActiveSubtype::Unknown;
         convertedBuffer.clear();
@@ -685,6 +689,7 @@ struct DirectShowCaptureImpl
         }
 
         const bool hasRequestedResolution = requestedWidth != 0 && requestedHeight != 0;
+        const bool hasRequestedFrameRate = requestedFrameRate100 != 0;
 
         auto subtypeScore = [this](const GUID& subtype) {
             switch (requestedFormatPreference)
@@ -739,7 +744,27 @@ struct DirectShowCaptureImpl
                 continue;
             }
 
-            const int score = subtypeScore(mediaType->subtype);
+            std::uint32_t candidateRate100 = 0;
+            if (vih->AvgTimePerFrame > 0)
+            {
+                const double frameRate = 10'000'000.0 / static_cast<double>(vih->AvgTimePerFrame);
+                candidateRate100 = static_cast<std::uint32_t>(std::llround(frameRate * 100.0));
+            }
+
+            int score = subtypeScore(mediaType->subtype);
+            if (hasRequestedFrameRate)
+            {
+                if (candidateRate100 == requestedFrameRate100)
+                {
+                    score += 10000;
+                }
+                else if (candidateRate100 > 0)
+                {
+                    const int diff = static_cast<int>(std::abs(static_cast<int>(candidateRate100) - static_cast<int>(requestedFrameRate100)));
+                    score += std::max(0, 5000 - diff);
+                }
+            }
+
             if (score > bestScore)
             {
                 if (best)
@@ -881,6 +906,12 @@ struct DirectShowCaptureImpl
         const std::uint32_t width = static_cast<std::uint32_t>(std::abs(biWidth));
         const std::uint32_t height = static_cast<std::uint32_t>(std::abs(biHeight));
         const DWORD bits = vih.bmiHeader.biBitCount ? vih.bmiHeader.biBitCount : 32;
+        std::uint32_t nominalFrameRate100 = 0;
+        if (vih.AvgTimePerFrame > 0)
+        {
+            const double frameRate = 10'000'000.0 / static_cast<double>(vih.AvgTimePerFrame);
+            nominalFrameRate100 = static_cast<std::uint32_t>(std::llround(frameRate * 100.0));
+        }
 
         RECT active = vih.rcSource;
         if (active.right <= active.left || active.bottom <= active.top)
@@ -933,10 +964,11 @@ struct DirectShowCaptureImpl
         std::ostringstream oss;
         oss << "[Capture] " << context
             << ": frame=" << width << "x" << height
-            << " stride=" << stride
-            << " subtype=" << subtypeName(subtype)
-            << " bottomUp=" << (isBottomUp ? "true" : "false")
-            << " rcSource={" << active.left << ", " << active.top << ", " << active.right << ", " << active.bottom << "}";
+            << " @" << std::fixed << std::setprecision(2) << (static_cast<double>(nominalFrameRate100) / 100.0)
+             << " stride=" << stride
+             << " subtype=" << subtypeName(subtype)
+             << " bottomUp=" << (isBottomUp ? "true" : "false")
+             << " rcSource={" << active.left << ", " << active.top << ", " << active.right << ", " << active.bottom << "}";
         logMessage(oss.str());
 
         if (updateState)
@@ -950,6 +982,7 @@ struct DirectShowCaptureImpl
             contentTop = static_cast<std::uint32_t>(active.top);
             contentRight = static_cast<std::uint32_t>(active.right);
             contentBottom = static_cast<std::uint32_t>(active.bottom);
+            activeFrameRate100 = nominalFrameRate100;
         }
     }
 
@@ -1050,8 +1083,9 @@ struct DirectShowCaptureImpl
         frame.sampleHeight = frameHeight;
         frame.contentLeft = contentLeft;
         frame.contentTop = contentTop;
-        frame.contentRight = contentRight != 0 ? contentRight : frameWidth;
-        frame.contentBottom = contentBottom != 0 ? contentBottom : frameHeight;
+        frame.contentRight = contentRight != 0 ? (contentRight) : frameWidth;
+        frame.contentBottom = contentBottom != 0 ? (contentBottom) : frameHeight;
+        frame.nominalFrameRate100 = activeFrameRate100;
 
         const std::uint32_t activeWidth = frame.contentRight > frame.contentLeft ? (frame.contentRight - frame.contentLeft) : frameWidth;
         const std::uint32_t activeHeight = frame.contentBottom > frame.contentTop ? (frame.contentBottom - frame.contentTop) : frameHeight;
@@ -1141,6 +1175,7 @@ struct DirectShowCaptureImpl
         contentRight = contentBottom = 0;
         bottomUp = false;
         activeSubtype = ActiveSubtype::Unknown;
+        activeFrameRate100 = 0;
         convertedBuffer.clear();
         audioEnabled = false;
     }
