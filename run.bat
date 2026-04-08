@@ -1,2 +1,2 @@
 call build.bat
-build\Release\pckvm.exe
+start build\Release\viewer.exe

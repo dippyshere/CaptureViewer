@@ -38,7 +38,7 @@ namespace
 
     void logMessage(const std::string& text)
     {
-        std::ofstream("pckvm.log", std::ios::app) << text << '\n';
+        std::ofstream("viewer.log", std::ios::app) << text << '\n';
     }
 
     std::string formatHr(HRESULT hr)

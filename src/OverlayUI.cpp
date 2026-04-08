@@ -244,7 +244,7 @@ void OverlayUI::drawMenuWindow(Application& app)
     ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.08f, 0.08f, 0.08f, 0.94f));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 10.0f);
     ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings;
-    if (!ImGui::Begin("CaptureKVM Settings", &menuVisible_, windowFlags))
+    if (!ImGui::Begin("Capture Settings", &menuVisible_, windowFlags))
     {
         ImGui::End();
         ImGui::PopStyleVar();

@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
 
-add_executable(pckvm
+add_executable(viewer
     src/main.cpp
     src/Application.cpp
     src/DirectShowCapture.cpp
@@ -25,7 +25,7 @@ add_executable(pckvm
     res/pckvm.rc
 )
 
-target_include_directories(pckvm
+target_include_directories(viewer
     PRIVATE
         include
         third_party/imgui
@@ -33,15 +33,15 @@ target_include_directories(pckvm
 )
 
 if(MSVC)
-    target_compile_options(pckvm PRIVATE /permissive- /Zc:__cplusplus /MP)
-    target_compile_definitions(pckvm PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_compile_options(viewer PRIVATE /permissive- /Zc:__cplusplus /MP)
+    target_compile_definitions(viewer PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
 endif()
 
-target_link_libraries(pckvm
+target_link_libraries(viewer
     PRIVATE
         d3d12
         dxgi
         strmiids
 )
 
-set_target_properties(pckvm PROPERTIES WIN32_EXECUTABLE TRUE)
+set_target_properties(viewer PROPERTIES WIN32_EXECUTABLE TRUE)

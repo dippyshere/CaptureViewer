@@ -97,7 +97,7 @@ float4 main(PSInput input) : SV_Target
 
     void logMessage(std::string_view message)
     {
-        OutputStream("pckvm.log", std::ios::app) << message << '\n';
+        OutputStream("viewer.log", std::ios::app) << message << '\n';
     }
 
     std::string hrToString(HRESULT hr)

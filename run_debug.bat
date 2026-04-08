@@ -1,2 +1,2 @@
 call build_debug.bat
-build_debug\release\pckvm.exe
+start build_debug\release\viewer.exe

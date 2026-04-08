@@ -24,7 +24,7 @@
 
 namespace
 {
-    constexpr wchar_t kWindowClassName[] = L"GC573.Window";
+    constexpr wchar_t kWindowClassName[] = L"Viewer.Window";
     constexpr int kDefaultWidth = 1920;
     constexpr int kDefaultHeight = 1080;
 
@@ -63,7 +63,7 @@ namespace
 
     void logApp(const std::string& message)
     {
-        std::ofstream("pckvm.log", std::ios::app) << message << '\n';
+        std::ofstream("viewer.log", std::ios::app) << message << '\n';
     }
 }
 
@@ -80,7 +80,7 @@ Application::~Application()
 int Application::run()
 {
     {
-        std::ofstream("pckvm.log", std::ios::trunc) << "[App] Launching viewer" << std::endl;
+        std::ofstream("viewer.log", std::ios::trunc) << "[App] Launching viewer" << std::endl;
     }
     logApp("[App] Starting initialization");
 

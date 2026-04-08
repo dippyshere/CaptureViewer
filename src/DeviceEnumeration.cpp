@@ -27,7 +27,7 @@ namespace
 
     void logFormatEnum(const std::string& message)
     {
-        std::ofstream("pckvm.log", std::ios::app) << "[FormatEnum] " << message << '\n';
+        std::ofstream("viewer.log", std::ios::app) << "[FormatEnum] " << message << '\n';
     }
 
     std::string guidToString(const GUID& guid)

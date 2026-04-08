@@ -12,7 +12,7 @@ namespace
 
     void logAudio(const std::string& message)
     {
-        std::ofstream("pckvm.log", std::ios::app) << message << '\n';
+        std::ofstream("viewer.log", std::ios::app) << message << '\n';
     }
 
     std::wstring toLowerCopy(std::wstring text)
