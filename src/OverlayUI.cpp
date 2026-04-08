@@ -17,6 +17,28 @@
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
+namespace
+{
+    struct OverlayDx12DescriptorContext
+    {
+        D3D12_CPU_DESCRIPTOR_HANDLE cpu{};
+        D3D12_GPU_DESCRIPTOR_HANDLE gpu{};
+    };
+
+    OverlayDx12DescriptorContext g_overlayDx12DescriptorContext{};
+
+    void overlaySrvAlloc(ImGui_ImplDX12_InitInfo* info, D3D12_CPU_DESCRIPTOR_HANDLE* outCpu, D3D12_GPU_DESCRIPTOR_HANDLE* outGpu)
+    {
+        auto* ctx = static_cast<OverlayDx12DescriptorContext*>(info->UserData);
+        *outCpu = ctx->cpu;
+        *outGpu = ctx->gpu;
+    }
+
+    void overlaySrvFree(ImGui_ImplDX12_InitInfo*, D3D12_CPU_DESCRIPTOR_HANDLE, D3D12_GPU_DESCRIPTOR_HANDLE)
+    {
+    }
+}
+
 OverlayUI::~OverlayUI()
 {
     shutdown();
@@ -39,7 +61,6 @@ bool OverlayUI::initialize(HWND hwnd, D3DRenderer& renderer)
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-    io.Fonts->Build();
 
     ImGui::StyleColorsDark();
     ImGuiStyle& style = ImGui::GetStyle();
@@ -48,8 +69,27 @@ bool OverlayUI::initialize(HWND hwnd, D3DRenderer& renderer)
     style.GrabRounding = 4.0f;
 
     ImGui_ImplWin32_Init(hwnd_);
-    ImGui_ImplDX12_Init(renderer.device(), static_cast<int>(renderer.frameCount()), renderer.renderTargetFormat(),
-                        srvHeap_, fontCpuHandle_, fontGpuHandle_);
+
+    g_overlayDx12DescriptorContext.cpu = fontCpuHandle_;
+    g_overlayDx12DescriptorContext.gpu = fontGpuHandle_;
+
+    ImGui_ImplDX12_InitInfo initInfo{};
+    initInfo.Device = renderer.device();
+    initInfo.CommandQueue = renderer.commandQueue();
+    initInfo.NumFramesInFlight = static_cast<int>(renderer.frameCount());
+    initInfo.RTVFormat = renderer.renderTargetFormat();
+    initInfo.DSVFormat = DXGI_FORMAT_UNKNOWN;
+    initInfo.SrvDescriptorHeap = srvHeap_;
+    initInfo.SrvDescriptorAllocFn = overlaySrvAlloc;
+    initInfo.SrvDescriptorFreeFn = overlaySrvFree;
+    initInfo.UserData = &g_overlayDx12DescriptorContext;
+
+    if (!ImGui_ImplDX12_Init(&initInfo))
+    {
+        ImGui_ImplWin32_Shutdown();
+        ImGui::DestroyContext();
+        return false;
+    }
 
     initialized_ = true;
     return true;

@@ -33,8 +33,8 @@ target_include_directories(viewer
 )
 
 if(MSVC)
-    target_compile_options(viewer PRIVATE /permissive- /Zc:__cplusplus /MP)
-    target_compile_definitions(viewer PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_compile_options(viewer PRIVATE /permissive- /Zc:__cplusplus /MP /O2 /GL)
+    target_compile_definitions(viewer PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX /O2 /GL)
 endif()
 
 target_link_libraries(viewer

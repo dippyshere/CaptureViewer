@@ -145,6 +145,8 @@ int Application::run()
 
     applyAudioPlaybackSetting();
 
+    SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED);
+
     logApp("[App] Entering render loop");
     renderLoop();
     logApp("[App] Render loop exited");
@@ -173,6 +175,8 @@ int Application::run()
 
     destroyWindow();
     logApp("[App] Window destroyed");
+
+    SetThreadExecutionState(ES_CONTINUOUS);
 
     return captureError.empty() ? EXIT_SUCCESS : EXIT_FAILURE;
 }

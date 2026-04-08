@@ -43,6 +43,7 @@ You can use this viewer to play through the preview, stream to Discord, or use i
 - Support for the uncompressed RGB8 format.
 - V-sync can be enabled.
 - Refresh rate can be set independently of the resolution.
+- Prevents sleep while the viewer is running.
 
 ## License
 
