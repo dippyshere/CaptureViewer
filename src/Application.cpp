@@ -569,8 +569,57 @@ void Application::renderLoop()
             DispatchMessage(&msg);
         }
 
+        if (!running_)
+        {
+            break;
+        }
+
         processPendingSourceDimensions();
-        renderFrame(false);
+
+        if (overlay_.isMenuVisible())
+        {
+            const bool forced = forceRender_.load(std::memory_order_acquire);
+
+            std::uint32_t targetFrameRate100 = currentSourceFrameRate100_.load(std::memory_order_acquire);
+            if (targetFrameRate100 == 0)
+            {
+                targetFrameRate100 = settings_.videoPreferredFrameRate100;
+            }
+            if (targetFrameRate100 == 0)
+            {
+                targetFrameRate100 = 6000;
+            }
+
+            targetFrameRate100 = std::clamp<std::uint32_t>(targetFrameRate100, 1500, 12000);
+
+            const double frameSeconds = 100.0 / static_cast<double>(targetFrameRate100);
+            const auto frameDuration = std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(frameSeconds));
+            const auto now = std::chrono::steady_clock::now();
+
+            if (overlayNextFrameDeadline_.time_since_epoch().count() == 0)
+            {
+                overlayNextFrameDeadline_ = now;
+            }
+
+            if (!forced && now < overlayNextFrameDeadline_)
+            {
+                std::this_thread::sleep_until(overlayNextFrameDeadline_);
+            }
+
+            renderFrame(false);
+
+            const auto afterRender = std::chrono::steady_clock::now();
+            overlayNextFrameDeadline_ += frameDuration;
+            if (overlayNextFrameDeadline_ < afterRender)
+            {
+                overlayNextFrameDeadline_ = afterRender;
+            }
+        }
+        else
+        {
+            overlayNextFrameDeadline_ = std::chrono::steady_clock::time_point{};
+            renderFrame(false);
+        }
     }
 }
 

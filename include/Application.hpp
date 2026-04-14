@@ -11,6 +11,7 @@
 
 #include <Windows.h>
 #include <atomic>
+#include <chrono>
 #include <mutex>
 #include <vector>
 
@@ -103,4 +104,5 @@ private:
     int lockedClientWidth_ = 0;
     int lockedClientHeight_ = 0;
     std::atomic<bool> forceRender_{false};
+    std::chrono::steady_clock::time_point overlayNextFrameDeadline_;
 };
