@@ -5,6 +5,7 @@
 #include "Settings.hpp"
 
 #include "imgui.h"
+#include "widgets/imgui_toggle.h"
 #include "backends/imgui_impl_dx12.h"
 #define IMGUI_IMPL_WIN32_DISABLE_GAMEPAD
 #include "backends/imgui_impl_win32.h"
@@ -64,9 +65,93 @@ bool OverlayUI::initialize(HWND hwnd, D3DRenderer& renderer)
 
     ImGui::StyleColorsDark();
     ImGuiStyle& style = ImGui::GetStyle();
-    style.WindowRounding = 6.0f;
-    style.FrameRounding = 4.0f;
-    style.GrabRounding = 4.0f;
+    ImVec4* colors = style.Colors;
+
+    const ImVec4 switchBg(28.0f / 255.0f, 28.0f / 255.0f, 28.0f / 255.0f, 0.97f);
+    const ImVec4 switchBg2(46.0f / 255.0f, 46.0f / 255.0f, 46.0f / 255.0f, 0.97f);
+    const ImVec4 switchBg3(60.0f / 255.0f, 60.0f / 255.0f, 60.0f / 255.0f, 0.97f);
+    const ImVec4 switchText(231.0f / 255.0f, 231.0f / 255.0f, 231.0f / 255.0f, 1.0f);
+    const ImVec4 switchTextDisabled(98.0f / 255.0f, 98.0f / 255.0f, 98.0f / 255.0f, 1.0f);
+    const ImVec4 switchAccent(45.0f / 255.0f, 177.0f / 255.0f, 228.0f / 255.0f, 1.0f);
+    const ImVec4 switchAccent2(35.0f / 255.0f, 137.0f / 255.0f, 177.0f / 255.0f, 1.0f);
+    const ImVec4 switchAccent3(50.0f / 255.0f, 196.0f / 255.0f, 253.0f / 255.0f, 1.0f);
+    const ImVec4 switchScrollbar(96.0f / 255.0f, 96.0f / 255.0f, 96.0f / 255.0f, 1.0f);
+
+    // --- 1. Sizing and Spacing ---
+    style.WindowPadding = ImVec2(10.0f, 10.0f);
+    style.FramePadding = ImVec2(7.0f, 7.0f);
+    style.CellPadding = ImVec2(8.0f, 8.0f);
+    style.ItemSpacing = ImVec2(8.0f, 7.0f);
+    style.ItemInnerSpacing = ImVec2(6.0f, 4.0f);
+    style.TouchExtraPadding = ImVec2(0.0f, 0.0f);
+    style.IndentSpacing = 20.0f;
+    style.ScrollbarSize = 8.0f;
+    style.GrabMinSize = 12.0f;
+
+    // --- 2. Borders ---
+    style.WindowBorderSize = 1.0f;
+    style.ChildBorderSize = 1.0f;
+    style.PopupBorderSize = 1.0f;
+    style.FrameBorderSize = 1.0f;
+    style.TabBorderSize = 0.0f;
+
+    // --- 3. Rounding ---
+    style.WindowRounding = 8.0f;
+    style.ChildRounding = 6.0f;
+    style.FrameRounding = 6.0f;
+    style.PopupRounding = 6.0f;
+    style.ScrollbarRounding = 6.0f;
+    style.GrabRounding = 6.0f;
+    style.LogSliderDeadzone = 4.0f;
+    style.TabRounding = 6.0f;
+
+    // Text
+    colors[ImGuiCol_Text] = switchText;
+    colors[ImGuiCol_TextDisabled] = switchTextDisabled;
+
+    // Backgrounds
+    colors[ImGuiCol_WindowBg] = switchBg;
+    colors[ImGuiCol_ChildBg] = switchBg;
+    colors[ImGuiCol_PopupBg] = switchBg2;
+
+    // Borders
+    colors[ImGuiCol_Border] = switchBg2;
+    colors[ImGuiCol_BorderShadow] = ImVec4(0.1f, 0.1f, 0.1f, 0.5f);
+
+    // Frames
+    colors[ImGuiCol_FrameBg] = switchBg2;
+    colors[ImGuiCol_FrameBgHovered] = switchScrollbar;
+    colors[ImGuiCol_FrameBgActive] = switchBg3;
+
+    // Title Bars and Menus
+    colors[ImGuiCol_TitleBg] = switchBg;
+    colors[ImGuiCol_TitleBgActive] = switchBg2;
+    colors[ImGuiCol_TitleBgCollapsed] = switchBg;
+    colors[ImGuiCol_MenuBarBg] = switchBg;
+
+    // Scrollbars
+    colors[ImGuiCol_ScrollbarBg] = switchBg;
+    colors[ImGuiCol_ScrollbarGrab] = switchScrollbar;
+    colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(106.0f / 255.0f, 106.0f / 255.0f, 106.0f / 255.0f, 1.0f);
+    colors[ImGuiCol_ScrollbarGrabActive] = ImVec4(122.0f / 255.0f, 122.0f / 255.0f, 122.0f / 255.0f, 1.0f);
+
+    // Interactables
+    colors[ImGuiCol_CheckMark] = switchAccent;
+    colors[ImGuiCol_SliderGrab] = switchAccent;
+    colors[ImGuiCol_SliderGrabActive] = switchText;
+    colors[ImGuiCol_Button] = switchAccent;
+    colors[ImGuiCol_ButtonHovered] = switchAccent3;
+    colors[ImGuiCol_ButtonActive] = switchAccent;
+    colors[ImGuiCol_Header] = switchAccent2;
+    colors[ImGuiCol_HeaderHovered] = switchAccent3;
+    colors[ImGuiCol_HeaderActive] = switchAccent;
+
+    // Tabs and misc
+    colors[ImGuiCol_Tab] = switchBg2;
+    colors[ImGuiCol_TabHovered] = switchScrollbar;
+    colors[ImGuiCol_TabSelected] = switchAccent;
+    colors[ImGuiCol_PlotLines] = switchAccent;
+    colors[ImGuiCol_TextSelectedBg] = ImVec4(switchAccent.x, switchAccent.y, switchAccent.z, 0.35f);
 
     ImGui_ImplWin32_Init(hwnd_);
 
@@ -262,34 +347,16 @@ void OverlayUI::drawMenuWindow(Application& app)
 {
     ImGuiIO& io = ImGui::GetIO();
 
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.0f, 0.0f, 0.0f, 0.55f));
-    ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
-    ImGui::SetNextWindowSize(io.DisplaySize);
-    ImGui::Begin("##overlay_bg", nullptr,
-                 ImGuiWindowFlags_NoDecoration |
-                 ImGuiWindowFlags_NoInputs |
-                 ImGuiWindowFlags_NoSavedSettings |
-                 ImGuiWindowFlags_NoMove |
-                 ImGuiWindowFlags_NoBringToFrontOnFocus);
-    ImGui::End();
-    ImGui::PopStyleColor();
-    ImGui::PopStyleVar(2);
-
-    const float panelWidth = 440.0f;
-    const float panelHeight = 690.0f;
-    ImVec2 panelPos((io.DisplaySize.x - panelWidth) * 0.5f, (io.DisplaySize.y - panelHeight) * 0.5f);
+    const float panelWidth = 460.0f;
+	const float panelHeight = 0.0f;
+    ImVec2 panelPos((io.DisplaySize.x - panelWidth) * 0.5f, std::clamp(io.DisplaySize.y - 800.0f, 0.0f, io.DisplaySize.y) * 0.5f);
     ImGui::SetNextWindowPos(panelPos, ImGuiCond_Always);
     ImGui::SetNextWindowSize(ImVec2(panelWidth, panelHeight));
-    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.08f, 0.08f, 0.08f, 0.94f));
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 10.0f);
+
     ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings;
-    if (!ImGui::Begin("Capture Settings", &menuVisible_, windowFlags))
+    if (!ImGui::Begin("Viewer Settings", &menuVisible_, windowFlags))
     {
         ImGui::End();
-        ImGui::PopStyleVar();
-        ImGui::PopStyleColor();
         if (!menuVisible_)
         {
             hideMenu(app);
@@ -299,8 +366,9 @@ void OverlayUI::drawMenuWindow(Application& app)
 
     ImGui::TextUnformatted("Video Settings");
     ImGui::Separator();
+	ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(7.0f, 5.0f));
     bool allowResizing = app.settings().videoAllowResizing;
-    if (ImGui::Checkbox("Allow Resizing", &allowResizing))
+    if (ImGui::Toggle("Allow Resizing", &allowResizing, ImGuiToggleFlags_Animated))
     {
         app.setVideoAllowResizing(allowResizing);
     }
@@ -311,7 +379,7 @@ void OverlayUI::drawMenuWindow(Application& app)
     {
         ImGui::BeginDisabled();
     }
-    if (ImGui::Checkbox("Borderless Windowed", &borderlessWindowed))
+    if (ImGui::Toggle("Borderless Windowed", &borderlessWindowed, ImGuiToggleFlags_Animated))
     {
         app.setBorderlessWindowed(borderlessWindowed);
     }
@@ -320,19 +388,21 @@ void OverlayUI::drawMenuWindow(Application& app)
         ImGui::EndDisabled();
     }
 
-    if (ImGui::Checkbox("Fullscreen", &fullscreen))
+    if (ImGui::Toggle("Fullscreen", &fullscreen, ImGuiToggleFlags_Animated))
     {
         app.setFullscreen(fullscreen);
     }
 
     bool vsyncEnabled = app.settings().vsyncEnabled;
-    if (ImGui::Checkbox("VSync", &vsyncEnabled))
+    if (ImGui::Toggle("VSync", &vsyncEnabled, ImGuiToggleFlags_Animated))
     {
         app.setVSyncEnabled(vsyncEnabled);
     }
+    ImGui::PopStyleVar();
 
     static const char* aspectOptions[] = {"Stretch", "Force Aspect Ratio", "Force Capture Resolution"};
     int currentAspect = static_cast<int>(app.settings().videoAspectMode);
+    ImGui::SetNextItemWidth(ImGui::GetWindowWidth() * 0.5f);
     if (ImGui::Combo("Aspect Mode", &currentAspect, aspectOptions, IM_ARRAYSIZE(aspectOptions)))
     {
         currentAspect = std::clamp(currentAspect, 0, 2);
@@ -341,15 +411,17 @@ void OverlayUI::drawMenuWindow(Application& app)
 
     ImGui::Spacing();
 
+	ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(35.0f / 255.0f, 137.0f / 255.0f, 177.0f / 255.0f, 1.0f));
     if (ImGui::Button("Refresh Devices"))
     {
         refreshDeviceLists(app);
     }
+	ImGui::PopStyleColor();
 
     ImGui::Spacing();
 
     ImGui::TextUnformatted("Video Capture Devices");
-    ImGui::BeginChild("VideoDevices", ImVec2(0.0f, 65), ImGuiChildFlags_Borders);
+    ImGui::BeginChild("VideoDevices", ImVec2(0.0f, 75), ImGuiChildFlags_Borders);
     const std::string& currentVideo = app.settings().videoDeviceMoniker;
     if (videoDevices_.empty())
     {
@@ -396,6 +468,7 @@ void OverlayUI::drawMenuWindow(Application& app)
         }
     }
 
+    ImGui::SetNextItemWidth(ImGui::GetWindowWidth() * 0.5f);
     if (ImGui::BeginCombo("Capture Resolution", resolutionLabel.c_str()))
     {
         for (const auto& [width, height] : resolutionOptions)
@@ -467,6 +540,7 @@ void OverlayUI::drawMenuWindow(Application& app)
     };
 
     std::string refreshLabel = frameRateLabel(app.settings().videoPreferredFrameRate100 != 0 ? app.settings().videoPreferredFrameRate100 : 6000);
+    ImGui::SetNextItemWidth(ImGui::GetWindowWidth() * 0.5f);
     if (ImGui::BeginCombo("Capture Refresh Rate", refreshLabel.c_str()))
     {
         if (refreshRateOptions100.empty())
@@ -502,6 +576,7 @@ void OverlayUI::drawMenuWindow(Application& app)
         }
     };
 
+    ImGui::SetNextItemWidth(ImGui::GetWindowWidth() * 0.5f);
     if (ImGui::BeginCombo("Capture Format", formatLabel(currentFormat)))
     {
         const bool autoSelected = currentFormat == VideoFormatPreference::Auto;
@@ -548,11 +623,11 @@ void OverlayUI::drawMenuWindow(Application& app)
     {
         if (signalRate100 != 0)
         {
-            ImGui::Text("Current Signal: %ux%u @ %.2f Hz", signalWidth, signalHeight, static_cast<double>(signalRate100) / 100.0);
+            ImGui::TextDisabled("Current Signal: %ux%u @ %.2f Hz", signalWidth, signalHeight, static_cast<double>(signalRate100) / 100.0);
         }
         else
         {
-            ImGui::Text("Current Signal: %ux%u", signalWidth, signalHeight);
+            ImGui::TextDisabled("Current Signal: %ux%u", signalWidth, signalHeight);
         }
     }
     else
@@ -564,8 +639,9 @@ void OverlayUI::drawMenuWindow(Application& app)
     ImGui::TextUnformatted("Audio Settings");
     ImGui::Separator();
 
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(7.0f, 5.0f));
     bool audioPlayback = app.settings().audioPlaybackEnabled;
-    if (ImGui::Checkbox("Enable Audio Playback", &audioPlayback))
+    if (ImGui::Toggle("Enable Audio Playback", &audioPlayback, ImGuiToggleFlags_Animated))
     {
         app.setAudioPlaybackEnabled(audioPlayback);
     }
@@ -574,8 +650,9 @@ void OverlayUI::drawMenuWindow(Application& app)
     {
         ImGui::BeginDisabled();
 	}
+    ImGui::PopStyleVar();
     ImGui::TextUnformatted("Audio Capture Input");
-    ImGui::BeginChild("AudioDevices", ImVec2(0.0f, 65), ImGuiChildFlags_Borders);
+    ImGui::BeginChild("AudioDevices", ImVec2(0.0f, 75), ImGuiChildFlags_Borders);
     const std::string& currentAudio = app.settings().audioDeviceMoniker;
     bool useVideoAudio = currentAudio == "@video" || currentAudio.empty();
     if (ImGui::Selectable("Use Video Source Audio", useVideoAudio))
@@ -603,12 +680,14 @@ void OverlayUI::drawMenuWindow(Application& app)
     ImGui::Spacing();
     ImGui::TextUnformatted("Audio Capture Output");
     bool defaultOnly = app.settings().audioOutputUseDefaultOnly;
-    if (ImGui::Checkbox("Use Default Output Device", &defaultOnly))
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(7.0f, 5.0f));
+    if (ImGui::Toggle("Use Default Output Device", &defaultOnly, ImGuiToggleFlags_Animated))
     {
         app.setAudioOutputUseDefaultOnly(defaultOnly);
     }
+    ImGui::PopStyleVar();
 
-    ImGui::BeginChild("AudioOutputDevices", ImVec2(0.0f, 120), ImGuiChildFlags_Borders);
+    ImGui::BeginChild("AudioOutputDevices", ImVec2(0.0f, 125), ImGuiChildFlags_Borders);
     if (defaultOnly)
     {
         ImGui::BeginDisabled();
@@ -625,10 +704,12 @@ void OverlayUI::drawMenuWindow(Application& app)
         {
             std::string label = !device.friendlyName.empty() ? device.friendlyName : device.monikerDisplayName;
             bool selected = std::find(selectedOutputs.begin(), selectedOutputs.end(), device.monikerDisplayName) != selectedOutputs.end();
-            if (ImGui::Checkbox(label.c_str(), &selected))
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(7.0f, 5.0f));
+            if (ImGui::Toggle(label.c_str(), &selected, ImGuiToggleFlags_Animated))
             {
                 app.setAudioOutputDeviceSelected(device.monikerDisplayName, selected);
             }
+			ImGui::PopStyleVar();
         }
     }
 
@@ -650,8 +731,6 @@ void OverlayUI::drawMenuWindow(Application& app)
     }
 
     ImGui::End();
-    ImGui::PopStyleVar();
-    ImGui::PopStyleColor();
 
     if (!menuVisible_)
     {

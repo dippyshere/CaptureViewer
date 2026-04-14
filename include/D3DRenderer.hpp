@@ -43,6 +43,7 @@ public:
     [[nodiscard]] HANDLE frameLatencyWaitableObject() const { return frameLatencyWaitableObject_; }
 
     void setViewportRect(float x, float y, float width, float height);
+    void setBlurEnabled(bool enabled) { blurEnabled_ = enabled; }
 
 private:
     struct FrameContext {
@@ -83,6 +84,7 @@ private:
     Microsoft::WRL::ComPtr<ID3D12RootSignature> rootSignature_;
     Microsoft::WRL::ComPtr<ID3D12PipelineState> pipelineState_;
     Microsoft::WRL::ComPtr<ID3D12PipelineState> pipelineStateGradient_;
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> pipelineStateBlur_;
 
     Microsoft::WRL::ComPtr<ID3D12Resource> vertexBuffer_;
     Microsoft::WRL::ComPtr<ID3D12Resource> indexBuffer_;
@@ -124,6 +126,7 @@ private:
     bool debugGradient_ = false;
     bool loggedGpuPixels_ = false;
     bool debugLayerEnabled_ = false;
+    bool blurEnabled_ = false;
 
     void updateViewport(UINT width, UINT height);
 };

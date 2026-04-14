@@ -1030,8 +1030,11 @@ void Application::processPendingSourceDimensions()
 void Application::renderFrame(bool forcePresent)
 {
     processPendingSourceDimensions();
-    
-    if (overlay_.isMenuVisible())
+
+    const bool menuVisible = overlay_.isMenuVisible();
+    renderer_.setBlurEnabled(menuVisible);
+
+    if (menuVisible)
     {
         overlay_.newFrame();
         overlay_.buildUI(*this);

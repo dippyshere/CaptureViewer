@@ -92,6 +92,58 @@ float4 main(PSInput input) : SV_Target
 }
 )";
 
+    constexpr const char* kPixelShaderBlurSource = R"(Texture2D frameTex : register(t0);
+SamplerState frameSampler : register(s0);
+
+struct PSInput
+{
+    float4 position : SV_Position;
+    float2 tex : TEXCOORD0;
+};
+
+float4 SampleDualKawaseLevel(float2 uv, float2 offset)
+{
+    float4 d = 0.0f;
+    d += frameTex.Sample(frameSampler, uv + float2( offset.x,  offset.y));
+    d += frameTex.Sample(frameSampler, uv + float2(-offset.x,  offset.y));
+    d += frameTex.Sample(frameSampler, uv + float2( offset.x, -offset.y));
+    d += frameTex.Sample(frameSampler, uv + float2(-offset.x, -offset.y));
+
+    float4 a = 0.0f;
+    a += frameTex.Sample(frameSampler, uv + float2( offset.x, 0.0f));
+    a += frameTex.Sample(frameSampler, uv + float2(-offset.x, 0.0f));
+    a += frameTex.Sample(frameSampler, uv + float2(0.0f,  offset.y));
+    a += frameTex.Sample(frameSampler, uv + float2(0.0f, -offset.y));
+
+    return (d + a) * (1.0f / 8.0f);
+}
+
+float4 main(PSInput input) : SV_Target
+{
+    uint w = 0, h = 0;
+    frameTex.GetDimensions(w, h);
+    float2 texel = float2(1.0f / max(1u, w), 1.0f / max(1u, h));
+
+    const float samplePosModifier = 1.0f;
+
+    float2 level2Offset = texel * (2.0f * samplePosModifier);
+    float2 level3Offset = texel * (3.0f * samplePosModifier);
+    float2 level4Offset = texel * (4.0f * samplePosModifier);
+    float2 level5Offset = texel * (5.0f * samplePosModifier);
+    float2 level6Offset = texel * (6.0f * samplePosModifier);
+
+    float4 l1 = SampleDualKawaseLevel(input.tex, level2Offset);
+    float4 l2 = SampleDualKawaseLevel(input.tex, level3Offset);
+    float4 l3 = SampleDualKawaseLevel(input.tex, level4Offset);
+    float4 l4 = SampleDualKawaseLevel(input.tex, level5Offset);
+    float4 l5 = SampleDualKawaseLevel(input.tex, level6Offset);
+
+    float4 c = l1 * 0.10f + l2 * 0.15f + l3 * 0.25f + l4 * 0.20f + l5 * 0.12f;
+
+    c.rgb *= 0.40f;
+    return c;
+}
+)";
 #if PCKVM_RENDERER_LOGGING
     using OutputStream = std::ofstream;
 
@@ -202,7 +254,8 @@ bool D3DRenderer::initialize(HWND hwnd)
         return false;
     }
 
-    if (!createSwapChain(hwnd))
+    if (!createSwapChain(hwnd)
+    )
     {
         return false;
     }
@@ -258,6 +311,7 @@ void D3DRenderer::shutdown()
     srvHeap_.Reset();
     rtvHeap_.Reset();
 
+    pipelineStateBlur_.Reset();
     pipelineStateGradient_.Reset();
     pipelineState_.Reset();
     rootSignature_.Reset();
@@ -629,7 +683,12 @@ void D3DRenderer::render(const std::function<void(ID3D12GraphicsCommandList*)>& 
     commandList_->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 
     commandList_->SetGraphicsRootSignature(rootSignature_.Get());
-    commandList_->SetPipelineState(pipelineState_.Get());
+    ID3D12PipelineState* activePso = pipelineState_.Get();
+    if (blurEnabled_ && pipelineStateBlur_)
+    {
+        activePso = pipelineStateBlur_.Get();
+    }
+    commandList_->SetPipelineState(activePso);
 
     ID3D12DescriptorHeap* heaps[] = {srvHeap_.Get(), samplerHeap_.Get()};
     commandList_->SetDescriptorHeaps(static_cast<UINT>(std::size(heaps)), heaps);
@@ -1019,6 +1078,7 @@ bool D3DRenderer::createPipelineResources()
     ComPtr<ID3DBlob> vsBlob;
     ComPtr<ID3DBlob> psBlob;
     ComPtr<ID3DBlob> psGradientBlob;
+    ComPtr<ID3DBlob> psBlurBlob;
     ComPtr<ID3DBlob> errorBlob;
 
     UINT compileFlags = D3DCOMPILE_ENABLE_STRICTNESS;
@@ -1073,6 +1133,23 @@ bool D3DRenderer::createPipelineResources()
                           errorBlob.GetAddressOf())))
     {
         logMessage("[Renderer] Gradient shader compilation failed");
+        return false;
+    }
+
+    errorBlob.Reset();
+    if (FAILED(D3DCompile(kPixelShaderBlurSource,
+                          std::strlen(kPixelShaderBlurSource),
+                          nullptr,
+                          nullptr,
+                          nullptr,
+                          "main",
+                          "ps_5_0",
+                          compileFlags,
+                          0,
+                          psBlurBlob.GetAddressOf(),
+                          errorBlob.GetAddressOf())))
+    {
+        logMessage("[Renderer] Blur shader compilation failed");
         return false;
     }
 
@@ -1194,6 +1271,15 @@ bool D3DRenderer::createPipelineResources()
     {
         logFailure("CreateGraphicsPipelineState (gradient)", hr);
         logInfoQueueMessages(device_.Get(), "CreateGraphicsPipelineState (gradient)");
+        return false;
+    }
+
+    psoDesc.PS = {psBlurBlob->GetBufferPointer(), psBlurBlob->GetBufferSize()};
+    hr = device_->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(pipelineStateBlur_.GetAddressOf()));
+    if (FAILED(hr))
+    {
+        logFailure("CreateGraphicsPipelineState (blur)", hr);
+        logInfoQueueMessages(device_.Get(), "CreateGraphicsPipelineState (blur)");
         return false;
     }
 

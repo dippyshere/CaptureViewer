@@ -21,6 +21,10 @@ add_executable(viewer
     third_party/imgui/imgui_widgets.cpp
     third_party/imgui/backends/imgui_impl_dx12.cpp
     third_party/imgui/backends/imgui_impl_win32.cpp
+    third_party/imgui/widgets/imgui_toggle.cpp
+    third_party/imgui/widgets/imgui_toggle_palette.cpp
+    third_party/imgui/widgets/imgui_toggle_presets.cpp
+    third_party/imgui/widgets/imgui_toggle_renderer.cpp
     res/pckvm.ico
     res/pckvm.rc
 )
