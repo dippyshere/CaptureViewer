@@ -228,6 +228,7 @@ void OverlayUI::refreshDeviceLists(Application& app)
 {
     videoDevices_ = enumerateVideoCaptureDevices();
     audioDevices_ = enumerateAudioCaptureDevices();
+    audioRenderDevices_ = enumerateAudioRenderDevices();
 
     refreshVideoModes(app);
     refreshVideoFormats(app);
@@ -276,8 +277,8 @@ void OverlayUI::drawMenuWindow(Application& app)
     ImGui::PopStyleColor();
     ImGui::PopStyleVar(2);
 
-    const float panelWidth = 460.0f;
-    const float panelHeight = 720.0f;
+    const float panelWidth = 440.0f;
+    const float panelHeight = 690.0f;
     ImVec2 panelPos((io.DisplaySize.x - panelWidth) * 0.5f, (io.DisplaySize.y - panelHeight) * 0.5f);
     ImGui::SetNextWindowPos(panelPos, ImGuiCond_Always);
     ImGui::SetNextWindowSize(ImVec2(panelWidth, panelHeight));
@@ -295,17 +296,6 @@ void OverlayUI::drawMenuWindow(Application& app)
         }
         return;
     }
-
-    ImGui::TextUnformatted("General");
-    ImGui::Separator();
-
-    bool audioPlayback = app.settings().audioPlaybackEnabled;
-    if (ImGui::Checkbox("Enable Audio Playback", &audioPlayback))
-    {
-        app.setAudioPlaybackEnabled(audioPlayback);
-    }
-
-    ImGui::Spacing();
 
     ImGui::TextUnformatted("Video Settings");
     ImGui::Separator();
@@ -358,10 +348,8 @@ void OverlayUI::drawMenuWindow(Application& app)
 
     ImGui::Spacing();
 
-    const float listHeight = 130.0f;
-
     ImGui::TextUnformatted("Video Capture Devices");
-    ImGui::BeginChild("VideoDevices", ImVec2(0.0f, listHeight), ImGuiChildFlags_Borders);
+    ImGui::BeginChild("VideoDevices", ImVec2(0.0f, 65), ImGuiChildFlags_Borders);
     const std::string& currentVideo = app.settings().videoDeviceMoniker;
     if (videoDevices_.empty())
     {
@@ -573,9 +561,21 @@ void OverlayUI::drawMenuWindow(Application& app)
     }
 
     ImGui::Spacing();
+    ImGui::TextUnformatted("Audio Settings");
+    ImGui::Separator();
 
-    ImGui::TextUnformatted("Audio Capture Devices");
-    ImGui::BeginChild("AudioDevices", ImVec2(0.0f, listHeight), ImGuiChildFlags_Borders);
+    bool audioPlayback = app.settings().audioPlaybackEnabled;
+    if (ImGui::Checkbox("Enable Audio Playback", &audioPlayback))
+    {
+        app.setAudioPlaybackEnabled(audioPlayback);
+    }
+
+    if (!audioPlayback)
+    {
+        ImGui::BeginDisabled();
+	}
+    ImGui::TextUnformatted("Audio Capture Input");
+    ImGui::BeginChild("AudioDevices", ImVec2(0.0f, 65), ImGuiChildFlags_Borders);
     const std::string& currentAudio = app.settings().audioDeviceMoniker;
     bool useVideoAudio = currentAudio == "@video" || currentAudio.empty();
     if (ImGui::Selectable("Use Video Source Audio", useVideoAudio))
@@ -599,6 +599,48 @@ void OverlayUI::drawMenuWindow(Application& app)
         }
     }
     ImGui::EndChild();
+
+    ImGui::Spacing();
+    ImGui::TextUnformatted("Audio Capture Output");
+    bool defaultOnly = app.settings().audioOutputUseDefaultOnly;
+    if (ImGui::Checkbox("Use Default Output Device", &defaultOnly))
+    {
+        app.setAudioOutputUseDefaultOnly(defaultOnly);
+    }
+
+    ImGui::BeginChild("AudioOutputDevices", ImVec2(0.0f, 120), ImGuiChildFlags_Borders);
+    if (defaultOnly)
+    {
+        ImGui::BeginDisabled();
+    }
+
+    if (audioRenderDevices_.empty())
+    {
+        ImGui::TextDisabled("No audio output devices detected");
+    }
+    else
+    {
+        const auto& selectedOutputs = app.settings().audioOutputDeviceMonikers;
+        for (const auto& device : audioRenderDevices_)
+        {
+            std::string label = !device.friendlyName.empty() ? device.friendlyName : device.monikerDisplayName;
+            bool selected = std::find(selectedOutputs.begin(), selectedOutputs.end(), device.monikerDisplayName) != selectedOutputs.end();
+            if (ImGui::Checkbox(label.c_str(), &selected))
+            {
+                app.setAudioOutputDeviceSelected(device.monikerDisplayName, selected);
+            }
+        }
+    }
+
+    if (defaultOnly)
+    {
+        ImGui::EndDisabled();
+    }
+    ImGui::EndChild();
+	if (!audioPlayback)
+    {
+        ImGui::EndDisabled();
+    }
 
     ImGui::Spacing();
 

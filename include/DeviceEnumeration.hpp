@@ -16,6 +16,11 @@ struct AudioCaptureDeviceInfo {
     std::string friendlyName;
 };
 
+struct AudioRenderDeviceInfo {
+    std::string monikerDisplayName;
+    std::string friendlyName;
+};
+
 struct VideoModeInfo {
     std::uint32_t width = 0;
     std::uint32_t height = 0;
@@ -24,5 +29,6 @@ struct VideoModeInfo {
 
 std::vector<VideoDeviceInfo> enumerateVideoCaptureDevices();
 std::vector<AudioCaptureDeviceInfo> enumerateAudioCaptureDevices();
+std::vector<AudioRenderDeviceInfo> enumerateAudioRenderDevices();
 std::vector<VideoModeInfo> enumerateVideoModes(const std::string& monikerDisplayName);
 std::vector<VideoFormatPreference> enumerateVideoFormats(const std::string& monikerDisplayName);

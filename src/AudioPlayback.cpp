@@ -5,6 +5,7 @@
 #include <cwctype>
 #include <fstream>
 #include <utility>
+#include <vector>
 
 namespace
 {
@@ -92,13 +93,24 @@ std::string AudioPlayback::narrow(const std::wstring& text)
     return result;
 }
 
-void AudioPlayback::start(const std::string& deviceMoniker)
+void AudioPlayback::start(const std::string& deviceMoniker, const std::vector<std::string>& outputDeviceMonikers, bool useDefaultOutputOnly)
 {
     stop();
 
     std::lock_guard<std::mutex> lock(mutex_);
 
     requestedMoniker_ = widen(deviceMoniker);
+    requestedOutputMonikers_.clear();
+    requestedOutputMonikers_.reserve(outputDeviceMonikers.size());
+    for (const std::string& moniker : outputDeviceMonikers)
+    {
+        const std::wstring wideMoniker = widen(moniker);
+        if (!wideMoniker.empty())
+        {
+            requestedOutputMonikers_.push_back(wideMoniker);
+        }
+    }
+    useDefaultOutputOnly_ = useDefaultOutputOnly || requestedOutputMonikers_.empty();
 
     HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     if (SUCCEEDED(hr) || hr == S_FALSE)
@@ -403,6 +415,8 @@ bool AudioPlayback::buildGraph()
     const ComPtr<IMoniker> selectedMoniker = selectedMoniker_;
     const std::wstring selectedFriendlyName = selectedFriendlyName_;
     const std::wstring selectedDisplayName = selectedDisplayName_;
+    const std::vector<std::wstring> requestedOutputMonikers = requestedOutputMonikers_;
+    const bool useDefaultOutputOnly = useDefaultOutputOnly_;
 
     releaseGraph();
 
@@ -455,35 +469,167 @@ bool AudioPlayback::buildGraph()
 
     sourceFilter_ = filter;
 
-    ComPtr<IBaseFilter> dsoundRenderer;
-    bool hasDirectSoundRenderer = false;
-    hr = CoCreateInstance(CLSID_DSoundRender, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dsoundRenderer));
-    if (SUCCEEDED(hr) && dsoundRenderer)
-    {
-        hr = graph_->AddFilter(dsoundRenderer.Get(), L"DirectSound Audio Renderer");
-        if (SUCCEEDED(hr))
+    std::vector<ComPtr<IBaseFilter>> outputRenderers;
+    outputRenderers.reserve(std::max<std::size_t>(1, requestedOutputMonikers.size()));
+
+    auto addDefaultRenderer = [&]() -> bool {
+        ComPtr<IBaseFilter> dsoundRenderer;
+        HRESULT localHr = CoCreateInstance(CLSID_DSoundRender, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dsoundRenderer));
+        if (FAILED(localHr) || !dsoundRenderer)
         {
-            hasDirectSoundRenderer = true;
-            logAudio("[Audio] Using DirectSound renderer for lower-latency monitoring");
+            return false;
+        }
+
+        localHr = graph_->AddFilter(dsoundRenderer.Get(), L"DirectSound Audio Renderer");
+        if (FAILED(localHr))
+        {
+            return false;
+        }
+
+        outputRenderers.push_back(std::move(dsoundRenderer));
+        logAudio("[Audio] Using default DirectSound renderer for low-latency monitoring");
+        return true;
+    };
+
+    auto addRendererFromMoniker = [&](const std::wstring& monikerText) -> bool {
+        if (monikerText.empty())
+        {
+            return false;
+        }
+
+        ComPtr<ICreateDevEnum> devEnum;
+        if (FAILED(CoCreateInstance(CLSID_SystemDeviceEnum, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&devEnum))) || !devEnum)
+        {
+            return false;
+        }
+
+        ComPtr<IEnumMoniker> enumMoniker;
+        if (devEnum->CreateClassEnumerator(CLSID_AudioRendererCategory, enumMoniker.GetAddressOf(), 0) != S_OK || !enumMoniker)
+        {
+            return false;
+        }
+
+        ComPtr<IMoniker> matchedMoniker;
+        std::wstring rendererName = L"Audio Renderer";
+
+        ComPtr<IMoniker> current;
+        ULONG fetched = 0;
+        while (enumMoniker->Next(1, current.GetAddressOf(), &fetched) == S_OK)
+        {
+            std::wstring displayName;
+            LPOLESTR display = nullptr;
+            if (SUCCEEDED(current->GetDisplayName(nullptr, nullptr, &display)) && display)
+            {
+                displayName.assign(display);
+                CoTaskMemFree(display);
+            }
+
+            if (displayName != monikerText)
+            {
+                current.Reset();
+                continue;
+            }
+
+            matchedMoniker = current;
+
+            ComPtr<IPropertyBag> bag;
+            if (SUCCEEDED(current->BindToStorage(nullptr, nullptr, IID_PPV_ARGS(&bag))) && bag)
+            {
+                VARIANT value;
+                VariantInit(&value);
+                if (SUCCEEDED(bag->Read(L"FriendlyName", &value, nullptr)) && value.vt == VT_BSTR)
+                {
+                    rendererName.assign(value.bstrVal, SysStringLen(value.bstrVal));
+                }
+                VariantClear(&value);
+            }
+
+            break;
+        }
+
+        if (!matchedMoniker)
+        {
+            return false;
+        }
+
+        ComPtr<IBaseFilter> renderer;
+        if (FAILED(matchedMoniker->BindToObject(nullptr, nullptr, IID_PPV_ARGS(&renderer))) || !renderer)
+        {
+            return false;
+        }
+
+        if (FAILED(graph_->AddFilter(renderer.Get(), rendererName.c_str())))
+        {
+            return false;
+        }
+
+        outputRenderers.push_back(std::move(renderer));
+        logAudio("[Audio] Added output renderer '" + narrow(rendererName) + "'");
+        return true;
+    };
+
+    if (useDefaultOutputOnly)
+    {
+        addDefaultRenderer();
+    }
+    else
+    {
+        for (const std::wstring& moniker : requestedOutputMonikers)
+        {
+            if (!addRendererFromMoniker(moniker))
+            {
+                logAudio("[Audio] Failed to resolve selected output renderer moniker");
+            }
+        }
+    }
+
+    if (outputRenderers.empty())
+    {
+        if (!addDefaultRenderer())
+        {
+            logAudio("[Audio] Failed to add any audio renderer");
+            return false;
         }
     }
 
     hr = E_FAIL;
-    if (hasDirectSoundRenderer)
+    if (outputRenderers.size() == 1)
     {
-        hr = builder_->RenderStream(&PIN_CATEGORY_PREVIEW, &MEDIATYPE_Audio, sourceFilter_.Get(), nullptr, dsoundRenderer.Get());
+        hr = builder_->RenderStream(&PIN_CATEGORY_PREVIEW, &MEDIATYPE_Audio, sourceFilter_.Get(), nullptr, outputRenderers.front().Get());
         if (FAILED(hr))
         {
-            hr = builder_->RenderStream(&PIN_CATEGORY_CAPTURE, &MEDIATYPE_Audio, sourceFilter_.Get(), nullptr, dsoundRenderer.Get());
+            hr = builder_->RenderStream(&PIN_CATEGORY_CAPTURE, &MEDIATYPE_Audio, sourceFilter_.Get(), nullptr, outputRenderers.front().Get());
         }
     }
-
-    if (FAILED(hr))
+    else
     {
-        hr = builder_->RenderStream(&PIN_CATEGORY_PREVIEW, &MEDIATYPE_Audio, sourceFilter_.Get(), nullptr, nullptr);
-        if (FAILED(hr))
+        ComPtr<IBaseFilter> tee;
+        hr = CoCreateInstance(CLSID_InfTee, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&tee));
+        if (SUCCEEDED(hr) && tee)
         {
-            hr = builder_->RenderStream(&PIN_CATEGORY_CAPTURE, &MEDIATYPE_Audio, sourceFilter_.Get(), nullptr, nullptr);
+            hr = graph_->AddFilter(tee.Get(), L"Audio Output Tee");
+        }
+
+        if (SUCCEEDED(hr))
+        {
+            hr = builder_->RenderStream(&PIN_CATEGORY_PREVIEW, &MEDIATYPE_Audio, sourceFilter_.Get(), nullptr, tee.Get());
+            if (FAILED(hr))
+            {
+                hr = builder_->RenderStream(&PIN_CATEGORY_CAPTURE, &MEDIATYPE_Audio, sourceFilter_.Get(), nullptr, tee.Get());
+            }
+        }
+
+        if (SUCCEEDED(hr))
+        {
+            for (const ComPtr<IBaseFilter>& renderer : outputRenderers)
+            {
+                HRESULT renderHr = builder_->RenderStream(nullptr, &MEDIATYPE_Audio, tee.Get(), nullptr, renderer.Get());
+                if (FAILED(renderHr))
+                {
+                    hr = renderHr;
+                    break;
+                }
+            }
         }
     }
 

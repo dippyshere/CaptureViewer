@@ -103,6 +103,7 @@ namespace
         bool inString = false;
         bool escaped = false;
         int braceDepth = 0;
+        int bracketDepth = 0;
         while (end < content.size())
         {
             char ch = content[end];
@@ -133,15 +134,29 @@ namespace
                 }
                 else if (ch == '}')
                 {
-                    if (braceDepth == 0)
+                    if (braceDepth == 0 && bracketDepth == 0)
                     {
                         break;
                     }
-                    --braceDepth;
+                    if (braceDepth > 0)
+                    {
+                        --braceDepth;
+                    }
+                }
+                else if (ch == '[')
+                {
+                    ++bracketDepth;
+                }
+                else if (ch == ']')
+                {
+                    if (bracketDepth > 0)
+                    {
+                        --bracketDepth;
+                    }
                 }
                 else if (ch == ',')
                 {
-                    if (braceDepth == 0)
+                    if (braceDepth == 0 && bracketDepth == 0)
                     {
                         break;
                     }
@@ -233,6 +248,69 @@ namespace
         value = unescapeJson(inner);
         return true;
     }
+
+    bool tryParseStringArray(const std::string& content, const std::string& key, std::vector<std::string>& values)
+    {
+        std::string raw = extractRawValue(content, key);
+        if (raw.empty() || raw.front() != '[' || raw.back() != ']')
+        {
+            return false;
+        }
+
+        values.clear();
+        std::size_t i = 1;
+        while (i + 1 < raw.size())
+        {
+            while (i + 1 < raw.size() && (raw[i] == ' ' || raw[i] == '\t' || raw[i] == '\n' || raw[i] == '\r' || raw[i] == ','))
+            {
+                ++i;
+            }
+            if (i + 1 >= raw.size() || raw[i] == ']')
+            {
+                break;
+            }
+            if (raw[i] != '"')
+            {
+                return false;
+            }
+            ++i;
+
+            std::string item;
+            bool escaped = false;
+            while (i < raw.size())
+            {
+                const char ch = raw[i++];
+                if (escaped)
+                {
+                    switch (ch)
+                    {
+                    case 'n': item.push_back('\n'); break;
+                    case 'r': item.push_back('\r'); break;
+                    case 't': item.push_back('\t'); break;
+                    case '"': item.push_back('"'); break;
+                    case '\\': item.push_back('\\'); break;
+                    default: item.push_back(ch); break;
+                    }
+                    escaped = false;
+                    continue;
+                }
+                if (ch == '\\')
+                {
+                    escaped = true;
+                    continue;
+                }
+                if (ch == '"')
+                {
+                    break;
+                }
+                item.push_back(ch);
+            }
+
+            values.push_back(std::move(item));
+        }
+
+        return true;
+    }
 }
 
 SettingsManager::SettingsManager()
@@ -282,6 +360,8 @@ AppSettings SettingsManager::load()
     tryParseUInt(content, "windowClientWidth", settings.windowClientWidth);
     tryParseUInt(content, "windowClientHeight", settings.windowClientHeight);
     tryParseBool(content, "hasWindowPlacement", settings.hasWindowPlacement);
+    tryParseBool(content, "audioOutputUseDefaultOnly", settings.audioOutputUseDefaultOnly);
+    tryParseStringArray(content, "audioOutputDeviceMonikers", settings.audioOutputDeviceMonikers);
 
     if (settings.videoPreferredWidth == 0 || settings.videoPreferredHeight == 0)
     {
@@ -353,6 +433,17 @@ void SettingsManager::save(const AppSettings& settings) const
     file << "  \"windowPosY\": " << settings.windowPosY << ",\n";
     file << "  \"windowClientWidth\": " << settings.windowClientWidth << ",\n";
     file << "  \"windowClientHeight\": " << settings.windowClientHeight << ",\n";
-    file << "  \"hasWindowPlacement\": " << (settings.hasWindowPlacement ? "true" : "false") << "\n";
+    file << "  \"hasWindowPlacement\": " << (settings.hasWindowPlacement ? "true" : "false") << ",\n";
+    file << "  \"audioOutputUseDefaultOnly\": " << (settings.audioOutputUseDefaultOnly ? "true" : "false") << ",\n";
+    file << "  \"audioOutputDeviceMonikers\": [";
+    for (std::size_t i = 0; i < settings.audioOutputDeviceMonikers.size(); ++i)
+    {
+        if (i != 0)
+        {
+            file << ", ";
+        }
+        file << "\"" << escapeJson(settings.audioOutputDeviceMonikers[i]) << "\"";
+    }
+    file << "]\n";
     file << "}\n";
 }

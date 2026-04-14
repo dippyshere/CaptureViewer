@@ -55,6 +55,8 @@ private:
     void setAudioPlaybackEnabled(bool enabled);
     void selectVideoDevice(const std::string& moniker);
     void selectAudioDevice(const std::string& moniker);
+    void setAudioOutputUseDefaultOnly(bool enabled);
+    void setAudioOutputDeviceSelected(const std::string& moniker, bool selected);
     void setVideoResolution(std::uint32_t width, std::uint32_t height);
     void setVideoFrameRate100(std::uint32_t frameRate100);
     void setVideoAllowResizing(bool enabled);

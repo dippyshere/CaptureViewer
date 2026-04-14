@@ -53,6 +53,7 @@ private:
 
     std::vector<VideoDeviceInfo> videoDevices_;
     std::vector<AudioCaptureDeviceInfo> audioDevices_;
+    std::vector<AudioRenderDeviceInfo> audioRenderDevices_;
     std::vector<VideoModeInfo> videoModes_;
     std::vector<VideoFormatPreference> videoFormats_;
 };

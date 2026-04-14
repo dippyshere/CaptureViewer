@@ -213,6 +213,11 @@ std::vector<AudioCaptureDeviceInfo> enumerateAudioCaptureDevices()
     return enumerateCategory<AudioCaptureDeviceInfo>(CLSID_AudioInputDeviceCategory);
 }
 
+std::vector<AudioRenderDeviceInfo> enumerateAudioRenderDevices()
+{
+    return enumerateCategory<AudioRenderDeviceInfo>(CLSID_AudioRendererCategory);
+}
+
 std::vector<VideoModeInfo> enumerateVideoModes(const std::string& monikerDisplayName)
 {
     std::vector<VideoModeInfo> modes;

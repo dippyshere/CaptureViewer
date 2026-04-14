@@ -6,13 +6,14 @@
 
 #include <mutex>
 #include <string>
+#include <vector>
 
 class AudioPlayback {
 public:
     AudioPlayback();
     ~AudioPlayback();
 
-    void start(const std::string& deviceMoniker);
+    void start(const std::string& deviceMoniker, const std::vector<std::string>& outputDeviceMonikers, bool useDefaultOutputOnly);
     void stop();
 
     [[nodiscard]] bool isRunning() const noexcept { return running_; }
@@ -29,6 +30,8 @@ private:
     bool running_ = false;
     bool coInitialized_ = false;
     std::wstring requestedMoniker_;
+    std::vector<std::wstring> requestedOutputMonikers_;
+    bool useDefaultOutputOnly_ = true;
     std::wstring selectedFriendlyName_;
     std::wstring selectedDisplayName_;
 

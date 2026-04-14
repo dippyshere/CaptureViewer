@@ -2,6 +2,7 @@
 
 #include <string>
 #include <filesystem>
+#include <vector>
 
 enum class VideoAspectMode : unsigned int {
     Stretch = 0,
@@ -33,6 +34,8 @@ struct AppSettings {
     unsigned int windowClientWidth = 0;
     unsigned int windowClientHeight = 0;
     bool hasWindowPlacement = false;
+    bool audioOutputUseDefaultOnly = true;
+    std::vector<std::string> audioOutputDeviceMonikers;
 };
 
 class SettingsManager {

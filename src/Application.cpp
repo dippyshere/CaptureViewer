@@ -614,16 +614,33 @@ void Application::applyAudioPlaybackSetting()
         restartVideoCapture();
     }
 
-    if (settings_.audioPlaybackEnabled && !useVideoAudio)
+    if (!settings_.audioPlaybackEnabled)
     {
-        if (!settings_.audioDeviceMoniker.empty())
-        {
-            audioPlayback_.start(settings_.audioDeviceMoniker);
-        }
-        else
-        {
-            audioPlayback_.stop();
-        }
+        audioPlayback_.stop();
+        return;
+    }
+
+    if (desiredCaptureAudio)
+    {
+        audioPlayback_.stop();
+        return;
+    }
+
+    std::string sourceMoniker;
+    if (useVideoAudio)
+    {
+        sourceMoniker = settings_.videoDeviceMoniker;
+    }
+    else
+    {
+        sourceMoniker = settings_.audioDeviceMoniker;
+    }
+
+    if (!sourceMoniker.empty())
+    {
+        audioPlayback_.start(sourceMoniker,
+                            settings_.audioOutputDeviceMonikers,
+                            settings_.audioOutputUseDefaultOnly);
     }
     else
     {
@@ -731,6 +748,63 @@ void Application::selectAudioDevice(const std::string& moniker)
     savePersistentSettings();
     const std::string logLabel = (settings_.audioDeviceMoniker == kAudioSourceVideoSentinel) ? std::string("video source audio") : settings_.audioDeviceMoniker;
     logApp(std::string("[App] Selected audio capture device: ") + logLabel);
+    applyAudioPlaybackSetting();
+    requestImmediateRender();
+}
+
+void Application::setAudioOutputUseDefaultOnly(bool enabled)
+{
+    if (settings_.audioOutputUseDefaultOnly == enabled)
+    {
+        return;
+    }
+
+    settings_.audioOutputUseDefaultOnly = enabled;
+    savePersistentSettings();
+    logApp(std::string("[App] Audio output mode -> ") + (enabled ? "default output only" : "selected output devices"));
+    applyAudioPlaybackSetting();
+    requestImmediateRender();
+}
+
+void Application::setAudioOutputDeviceSelected(const std::string& moniker, bool selected)
+{
+    if (moniker.empty())
+    {
+        return;
+    }
+
+    auto& outputs = settings_.audioOutputDeviceMonikers;
+    const auto it = std::find(outputs.begin(), outputs.end(), moniker);
+    bool changed = false;
+
+    if (selected)
+    {
+        if (it == outputs.end())
+        {
+            outputs.push_back(moniker);
+            changed = true;
+        }
+        if (settings_.audioOutputUseDefaultOnly)
+        {
+            settings_.audioOutputUseDefaultOnly = false;
+            changed = true;
+        }
+    }
+    else
+    {
+        if (it != outputs.end())
+        {
+            outputs.erase(it);
+            changed = true;
+        }
+    }
+
+    if (!changed)
+    {
+        return;
+    }
+
+    savePersistentSettings();
     applyAudioPlaybackSetting();
     requestImmediateRender();
 }
@@ -1221,7 +1295,19 @@ bool Application::shouldUseVideoAudio() const
 
 bool Application::shouldEnableCaptureAudio() const
 {
-    return settings_.audioPlaybackEnabled && shouldUseVideoAudio();
+    if (!settings_.audioPlaybackEnabled || !shouldUseVideoAudio())
+    {
+        return false;
+    }
+
+    // Capture-graph monitoring is kept only for default output mode.
+    // Any explicit output selection is routed through AudioPlayback.
+    if (!settings_.audioOutputUseDefaultOnly)
+    {
+        return false;
+    }
+
+    return settings_.audioOutputDeviceMonikers.empty();
 }
 
 void Application::restartVideoCapture()
