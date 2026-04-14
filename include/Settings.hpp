@@ -28,6 +28,11 @@ struct AppSettings {
     bool vsyncEnabled = true;
     VideoAspectMode videoAspectMode = VideoAspectMode::Maintain;
     VideoFormatPreference videoFormatPreference = VideoFormatPreference::Auto;
+    int windowPosX = 0;
+    int windowPosY = 0;
+    unsigned int windowClientWidth = 0;
+    unsigned int windowClientHeight = 0;
+    bool hasWindowPlacement = false;
 };
 
 class SettingsManager {

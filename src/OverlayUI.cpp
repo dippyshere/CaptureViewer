@@ -315,13 +315,21 @@ void OverlayUI::drawMenuWindow(Application& app)
         app.setVideoAllowResizing(allowResizing);
     }
 
+    bool fullscreen = app.settings().videoFullscreen;
     bool borderlessWindowed = app.settings().videoBorderlessWindowed;
+    if (fullscreen)
+    {
+        ImGui::BeginDisabled();
+    }
     if (ImGui::Checkbox("Borderless Windowed", &borderlessWindowed))
     {
         app.setBorderlessWindowed(borderlessWindowed);
     }
+    if (fullscreen)
+    {
+        ImGui::EndDisabled();
+    }
 
-    bool fullscreen = app.settings().videoFullscreen;
     if (ImGui::Checkbox("Fullscreen", &fullscreen))
     {
         app.setFullscreen(fullscreen);

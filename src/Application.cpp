@@ -74,6 +74,7 @@ Application::~Application()
     audioPlayback_.stop();
     directShowCapture_.stop();
     renderer_.shutdown();
+    captureWindowPlacementForPersistence();
     destroyWindow();
 }
 
@@ -173,6 +174,7 @@ int Application::run()
         logApp(std::string("[App] Reporting error: ") + captureError);
     }
 
+    captureWindowPlacementForPersistence();
     destroyWindow();
     logApp("[App] Window destroyed");
 
@@ -284,6 +286,7 @@ LRESULT CALLBACK Application::windowProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
         }
         break;
     case WM_CLOSE:
+        self->captureWindowPlacementForPersistence();
         logApp("[App] WM_CLOSE received");
         break;
     case WM_DESTROY:
@@ -337,7 +340,14 @@ bool Application::createWindow(int width, int height)
     classRegistered_ = true;
 
     DWORD style = (settings_.videoFullscreen || settings_.videoBorderlessWindowed) ? (WS_POPUP | WS_VISIBLE) : (WS_OVERLAPPEDWINDOW | WS_VISIBLE);
-    RECT rect{0, 0, width, height};
+    const int initialClientWidth = (settings_.hasWindowPlacement && settings_.windowClientWidth > 0)
+        ? static_cast<int>(settings_.windowClientWidth)
+        : width;
+    const int initialClientHeight = (settings_.hasWindowPlacement && settings_.windowClientHeight > 0)
+        ? static_cast<int>(settings_.windowClientHeight)
+        : height;
+
+    RECT rect{0, 0, initialClientWidth, initialClientHeight};
     AdjustWindowRect(&rect, style, FALSE);
 
     const int windowWidth = rect.right - rect.left;
@@ -346,17 +356,25 @@ bool Application::createWindow(int width, int height)
     int windowX = CW_USEDEFAULT;
     int windowY = CW_USEDEFAULT;
 
-    POINT cursorPos{};
-    if (GetCursorPos(&cursorPos))
+    if (settings_.hasWindowPlacement)
     {
-        const HMONITOR monitor = MonitorFromPoint(cursorPos, MONITOR_DEFAULTTONEAREST);
-        MONITORINFO monitorInfo{};
-        monitorInfo.cbSize = sizeof(monitorInfo);
-        if (monitor && GetMonitorInfoW(monitor, &monitorInfo))
+        windowX = settings_.windowPosX;
+        windowY = settings_.windowPosY;
+    }
+    else
+    {
+        POINT cursorPos{};
+        if (GetCursorPos(&cursorPos))
         {
-            const int monitorWidth = monitorInfo.rcMonitor.right - monitorInfo.rcMonitor.left;
-            windowX = monitorInfo.rcMonitor.left + (monitorWidth - windowWidth) / 2;
-            windowY = monitorInfo.rcMonitor.top + 100;
+            const HMONITOR monitor = MonitorFromPoint(cursorPos, MONITOR_DEFAULTTONEAREST);
+            MONITORINFO monitorInfo{};
+            monitorInfo.cbSize = sizeof(monitorInfo);
+            if (monitor && GetMonitorInfoW(monitor, &monitorInfo))
+            {
+                const int monitorWidth = monitorInfo.rcMonitor.right - monitorInfo.rcMonitor.left;
+                windowX = monitorInfo.rcMonitor.left + (monitorWidth - windowWidth) / 2;
+                windowY = monitorInfo.rcMonitor.top + (monitorInfo.rcMonitor.bottom - monitorInfo.rcMonitor.top - windowHeight) / 2;
+            }
         }
     }
 
@@ -1011,17 +1029,8 @@ bool Application::resizeWindowToClient(int width, int height)
         return false;
     }
 
-    int windowX = currentWindowRect.left;
+    const int windowX = currentWindowRect.left;
     const int windowY = currentWindowRect.top;
-
-    const HMONITOR monitor = MonitorFromRect(&currentWindowRect, MONITOR_DEFAULTTONEAREST);
-    MONITORINFO monitorInfo{};
-    monitorInfo.cbSize = sizeof(monitorInfo);
-    if (monitor && GetMonitorInfoW(monitor, &monitorInfo))
-    {
-        const int monitorWidth = monitorInfo.rcMonitor.right - monitorInfo.rcMonitor.left;
-        windowX = monitorInfo.rcMonitor.left + (monitorWidth - windowWidth) / 2;
-    }
 
     if (!SetWindowPos(hwnd_, nullptr, windowX, windowY, windowWidth, windowHeight,
                       SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOSENDCHANGING))
@@ -1055,7 +1064,7 @@ void Application::updateWindowResizeMode()
         monitorInfo.cbSize = sizeof(monitorInfo);
         if (monitor && GetMonitorInfoW(monitor, &monitorInfo))
         {
-            SetWindowPos(hwnd_, HWND_TOPMOST,
+            SetWindowPos(hwnd_, HWND_NOTOPMOST,
                          monitorInfo.rcMonitor.left,
                          monitorInfo.rcMonitor.top,
                          monitorInfo.rcMonitor.right - monitorInfo.rcMonitor.left,
@@ -1255,4 +1264,40 @@ void Application::restartVideoCapture()
     {
         logApp("[App] Failed to restart capture: unknown error");
     }
+}
+
+void Application::captureWindowPlacementForPersistence()
+{
+    if (!hwnd_ || IsIconic(hwnd_) || settings_.videoFullscreen)
+    {
+        return;
+    }
+
+    WINDOWPLACEMENT placement{};
+    placement.length = sizeof(placement);
+    if (!GetWindowPlacement(hwnd_, &placement))
+    {
+        return;
+    }
+
+    RECT clientRect{};
+    if (!GetClientRect(hwnd_, &clientRect))
+    {
+        return;
+    }
+
+    const int clientWidth = clientRect.right - clientRect.left;
+    const int clientHeight = clientRect.bottom - clientRect.top;
+    if (clientWidth <= 0 || clientHeight <= 0)
+    {
+        return;
+    }
+
+    const RECT normalRect = placement.rcNormalPosition;
+    settings_.windowPosX = normalRect.left;
+    settings_.windowPosY = normalRect.top;
+    settings_.windowClientWidth = static_cast<unsigned int>(clientWidth);
+    settings_.windowClientHeight = static_cast<unsigned int>(clientHeight);
+    settings_.hasWindowPlacement = true;
+    savePersistentSettings();
 }

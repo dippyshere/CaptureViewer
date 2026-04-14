@@ -47,6 +47,7 @@ private:
     void applySourceDimensions(std::uint32_t width, std::uint32_t height);
     bool resizeWindowToClient(int width, int height);
     void updateWindowResizeMode();
+    void captureWindowPlacementForPersistence();
     bool applyLockedWindowSize(MINMAXINFO* info) const;
     RECT computeVideoViewport(const RECT& clientRect, bool& valid) const;
     bool uploadLatestFrame();

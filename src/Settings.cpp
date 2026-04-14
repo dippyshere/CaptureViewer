@@ -172,6 +172,24 @@ namespace
         return false;
     }
 
+    bool tryParseInt(const std::string& content, const std::string& key, int& value)
+    {
+        const std::string raw = extractRawValue(content, key);
+        if (raw.empty())
+        {
+            return false;
+        }
+        try
+        {
+            value = std::stoi(raw);
+            return true;
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
     bool tryParseUInt(const std::string& content, const std::string& key, unsigned int& value)
     {
         const std::string raw = extractRawValue(content, key);
@@ -259,6 +277,11 @@ AppSettings SettingsManager::load()
     tryParseBool(content, "videoBorderlessWindowed", settings.videoBorderlessWindowed);
     tryParseBool(content, "videoFullscreen", settings.videoFullscreen);
     tryParseBool(content, "vsyncEnabled", settings.vsyncEnabled);
+    tryParseInt(content, "windowPosX", settings.windowPosX);
+    tryParseInt(content, "windowPosY", settings.windowPosY);
+    tryParseUInt(content, "windowClientWidth", settings.windowClientWidth);
+    tryParseUInt(content, "windowClientHeight", settings.windowClientHeight);
+    tryParseBool(content, "hasWindowPlacement", settings.hasWindowPlacement);
 
     if (settings.videoPreferredWidth == 0 || settings.videoPreferredHeight == 0)
     {
@@ -325,6 +348,11 @@ void SettingsManager::save(const AppSettings& settings) const
     file << "  \"videoFullscreen\": " << (settings.videoFullscreen ? "true" : "false") << ",\n";
     file << "  \"vsyncEnabled\": " << (settings.vsyncEnabled ? "true" : "false") << ",\n";
     file << "  \"videoAspectMode\": " << static_cast<unsigned int>(settings.videoAspectMode) << ",\n";
-    file << "  \"videoFormatPreference\": " << static_cast<unsigned int>(settings.videoFormatPreference) << "\n";
+    file << "  \"videoFormatPreference\": " << static_cast<unsigned int>(settings.videoFormatPreference) << ",\n";
+    file << "  \"windowPosX\": " << settings.windowPosX << ",\n";
+    file << "  \"windowPosY\": " << settings.windowPosY << ",\n";
+    file << "  \"windowClientWidth\": " << settings.windowClientWidth << ",\n";
+    file << "  \"windowClientHeight\": " << settings.windowClientHeight << ",\n";
+    file << "  \"hasWindowPlacement\": " << (settings.hasWindowPlacement ? "true" : "false") << "\n";
     file << "}\n";
 }
