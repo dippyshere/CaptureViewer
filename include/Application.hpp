@@ -104,6 +104,9 @@ private:
     std::atomic<std::uint32_t> currentSourceFrameRate100_{0};
     int lockedClientWidth_ = 0;
     int lockedClientHeight_ = 0;
+    bool suppressCaptureDrivenResize_ = false;
+    bool initialMaximizePending_ = false;
+    bool initialMaximizeRestoreSeen_ = false;
     std::atomic<bool> forceRender_{false};
     std::chrono::steady_clock::time_point overlayNextFrameDeadline_;
 };

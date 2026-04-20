@@ -261,6 +261,34 @@ LRESULT CALLBACK Application::windowProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
     {
         const UINT width = LOWORD(lParam);
         const UINT height = HIWORD(lParam);
+        if (wParam == SIZE_MAXIMIZED)
+        {
+            self->suppressCaptureDrivenResize_ = true;
+        }
+        else if (wParam == SIZE_RESTORED)
+        {
+            if (self->initialMaximizePending_)
+            {
+                self->initialMaximizeRestoreSeen_ = true;
+                self->initialMaximizePending_ = false;
+                self->renderer_.onResize(width, height);
+                logApp("[App] WM_SIZE -> " + std::to_string(width) + "x" + std::to_string(height));
+                return 0;
+            }
+
+            const bool wasSuppressed = self->suppressCaptureDrivenResize_;
+            self->suppressCaptureDrivenResize_ = false;
+            if (wasSuppressed)
+            {
+                const std::uint32_t srcW = self->currentSourceWidth_.load(std::memory_order_acquire);
+                const std::uint32_t srcH = self->currentSourceHeight_.load(std::memory_order_acquire);
+                if (srcW > 0 && srcH > 0 && !self->settings_.videoFullscreen)
+                {
+                    self->resizeWindowToClient(static_cast<int>(srcW), static_cast<int>(srcH));
+                    self->updateWindowResizeMode();
+                }
+            }
+        }
         self->renderer_.onResize(width, height);
         logApp("[App] WM_SIZE -> " + std::to_string(width) + "x" + std::to_string(height));
         return 0;
@@ -322,6 +350,7 @@ bool Application::createWindow(int width, int height)
     wc.lpfnWndProc = &Application::windowProc;
     wc.hInstance = GetModuleHandle(nullptr);
     wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+    wc.hbrBackground = static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH));
     wc.lpszClassName = kWindowClassName;
 
     const HICON classIcon = static_cast<HICON>(LoadImageW(GetModuleHandle(nullptr),
@@ -419,15 +448,29 @@ bool Application::createWindow(int width, int height)
         logApp("[App] SetWindowTextW failed");
     }
 
-    ShowWindow(hwnd_, SW_SHOW);
+    ShowWindow(hwnd_, (settings_.hasWindowPlacement && settings_.windowWasMaximized && !settings_.videoFullscreen) ? SW_SHOWMAXIMIZED : SW_SHOW);
+    suppressCaptureDrivenResize_ = settings_.hasWindowPlacement && settings_.windowWasMaximized;
+    initialMaximizePending_ = settings_.hasWindowPlacement && settings_.windowWasMaximized;
+    initialMaximizeRestoreSeen_ = false;
     UpdateWindow(hwnd_);
     RECT initialClient{};
     if (GetClientRect(hwnd_, &initialClient))
     {
-        lockedClientWidth_ = initialClient.right - initialClient.left;
-        lockedClientHeight_ = initialClient.bottom - initialClient.top;
+        if (settings_.hasWindowPlacement && settings_.windowWasMaximized && settings_.windowClientWidth > 0 && settings_.windowClientHeight > 0)
+        {
+            lockedClientWidth_ = static_cast<int>(settings_.windowClientWidth);
+            lockedClientHeight_ = static_cast<int>(settings_.windowClientHeight);
+        }
+        else
+        {
+            lockedClientWidth_ = initialClient.right - initialClient.left;
+            lockedClientHeight_ = initialClient.bottom - initialClient.top;
+        }
     }
-    updateWindowResizeMode();
+    if (!initialMaximizePending_)
+    {
+        updateWindowResizeMode();
+    }
     logApp("[App] Window created");
     return true;
 }
@@ -638,6 +681,9 @@ void Application::loadPersistentSettings()
         settings_.audioDeviceMoniker = kAudioSourceVideoSentinel;
     }
     audioEnabled_ = shouldEnableCaptureAudio();
+    suppressCaptureDrivenResize_ = settings_.windowWasMaximized;
+    initialMaximizePending_ = settings_.windowWasMaximized;
+    initialMaximizeRestoreSeen_ = false;
 }
 
 void Application::savePersistentSettings()
@@ -1147,6 +1193,11 @@ void Application::applySourceDimensions(std::uint32_t width, std::uint32_t heigh
         lastLoggedHeight = height;
     }
 
+    if (hwnd_ && (suppressCaptureDrivenResize_ || IsZoomed(hwnd_)))
+    {
+        return;
+    }
+
     lockedClientWidth_ = static_cast<int>(width);
     lockedClientHeight_ = static_cast<int>(height);
 
@@ -1281,6 +1332,11 @@ void Application::updateWindowResizeMode(bool preserveClientPosition)
 
     SetWindowPos(hwnd_, HWND_NOTOPMOST, 0, 0, 0, 0,
                  SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOSENDCHANGING | SWP_FRAMECHANGED);
+
+    if (IsZoomed(hwnd_))
+    {
+        return;
+    }
 
     const int desiredWidth = lockedClientWidth_ > 0 ? lockedClientWidth_ : kDefaultWidth;
     const int desiredHeight = lockedClientHeight_ > 0 ? lockedClientHeight_ : kDefaultHeight;
@@ -1503,18 +1559,36 @@ void Application::captureWindowPlacementForPersistence()
         return;
     }
 
-    const int clientWidth = clientRect.right - clientRect.left;
-    const int clientHeight = clientRect.bottom - clientRect.top;
-    if (clientWidth <= 0 || clientHeight <= 0)
-    {
-        return;
-    }
-
+    const bool maximized = IsZoomed(hwnd_) || placement.showCmd == SW_SHOWMAXIMIZED;
     const RECT normalRect = placement.rcNormalPosition;
     settings_.windowPosX = normalRect.left;
     settings_.windowPosY = normalRect.top;
-    settings_.windowClientWidth = static_cast<unsigned int>(clientWidth);
-    settings_.windowClientHeight = static_cast<unsigned int>(clientHeight);
+
+    if (maximized)
+    {
+        RECT normalClientRect{0, 0, normalRect.right - normalRect.left, normalRect.bottom - normalRect.top};
+        DWORD style = static_cast<DWORD>(GetWindowLongPtr(hwnd_, GWL_STYLE));
+        DWORD exStyle = static_cast<DWORD>(GetWindowLongPtr(hwnd_, GWL_EXSTYLE));
+        if (AdjustWindowRectEx(&normalClientRect, style, FALSE, exStyle))
+        {
+            const int normalClientWidth = normalClientRect.right - normalClientRect.left;
+            const int normalClientHeight = normalClientRect.bottom - normalClientRect.top;
+            settings_.windowClientWidth = static_cast<unsigned int>(std::max(1, normalClientWidth));
+            settings_.windowClientHeight = static_cast<unsigned int>(std::max(1, normalClientHeight));
+        }
+    }
+    else
+    {
+        const int clientWidth = clientRect.right - clientRect.left;
+        const int clientHeight = clientRect.bottom - clientRect.top;
+        if (clientWidth > 0 && clientHeight > 0)
+        {
+            settings_.windowClientWidth = static_cast<unsigned int>(clientWidth);
+            settings_.windowClientHeight = static_cast<unsigned int>(clientHeight);
+        }
+    }
+
     settings_.hasWindowPlacement = true;
+    settings_.windowWasMaximized = maximized;
     savePersistentSettings();
 }

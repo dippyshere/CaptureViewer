@@ -34,6 +34,7 @@ struct AppSettings {
     unsigned int windowClientWidth = 0;
     unsigned int windowClientHeight = 0;
     bool hasWindowPlacement = false;
+    bool windowWasMaximized = false;
     bool audioOutputUseDefaultOnly = true;
     std::vector<std::string> audioOutputDeviceMonikers;
 };

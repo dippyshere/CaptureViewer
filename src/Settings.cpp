@@ -360,6 +360,7 @@ AppSettings SettingsManager::load()
     tryParseUInt(content, "windowClientWidth", settings.windowClientWidth);
     tryParseUInt(content, "windowClientHeight", settings.windowClientHeight);
     tryParseBool(content, "hasWindowPlacement", settings.hasWindowPlacement);
+    tryParseBool(content, "windowWasMaximized", settings.windowWasMaximized);
     tryParseBool(content, "audioOutputUseDefaultOnly", settings.audioOutputUseDefaultOnly);
     tryParseStringArray(content, "audioOutputDeviceMonikers", settings.audioOutputDeviceMonikers);
 
@@ -434,6 +435,7 @@ void SettingsManager::save(const AppSettings& settings) const
     file << "  \"windowClientWidth\": " << settings.windowClientWidth << ",\n";
     file << "  \"windowClientHeight\": " << settings.windowClientHeight << ",\n";
     file << "  \"hasWindowPlacement\": " << (settings.hasWindowPlacement ? "true" : "false") << ",\n";
+    file << "  \"windowWasMaximized\": " << (settings.windowWasMaximized ? "true" : "false") << ",\n";
     file << "  \"audioOutputUseDefaultOnly\": " << (settings.audioOutputUseDefaultOnly ? "true" : "false") << ",\n";
     file << "  \"audioOutputDeviceMonikers\": [";
     for (std::size_t i = 0; i < settings.audioOutputDeviceMonikers.size(); ++i)
