@@ -218,8 +218,7 @@ void OverlayUI::newFrame()
     ImGui_ImplWin32_NewFrame();
     ImGui::NewFrame();
     ImGuiIO& io = ImGui::GetIO();
-    io.MouseDrawCursor = menuVisible_;
-
+    io.MouseDrawCursor = false;
 }
 
 void OverlayUI::buildUI(Application& app)
@@ -301,7 +300,7 @@ void OverlayUI::hideMenu(Application& app)
     }
     menuVisible_ = false;
     drawDataValid_ = false;
-    ImGui::GetIO().MouseDrawCursor = false;
+    SetCursor(nullptr);
     app.requestImmediateRender();
 }
 
@@ -313,7 +312,6 @@ void OverlayUI::showMenu(Application& app)
     }
     menuVisible_ = true;
     refreshDeviceLists(app);
-    ImGui::GetIO().MouseDrawCursor = true;
     app.requestImmediateRender();
 }
 
