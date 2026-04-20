@@ -44,6 +44,7 @@ You can use this viewer to play through the preview, stream to Discord, or use i
 - V-sync can be enabled.
 - Refresh rate can be set independently of the resolution.
 - Prevents sleep while the viewer is running.
+- Audio monitoring can output to multiple devices at once.
 
 ## License
 
