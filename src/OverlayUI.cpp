@@ -16,6 +16,9 @@
 #include <sstream>
 #include <string_view>
 
+extern const unsigned char* const udsgr;
+extern const unsigned int udsgr_size;
+
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 namespace
@@ -62,6 +65,11 @@ bool OverlayUI::initialize(HWND hwnd, D3DRenderer& renderer)
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+
+    if (ImFont* menuFont = io.Fonts->AddFontFromMemoryCompressedTTF(udsgr, static_cast<int>(udsgr_size), 15.0f))
+    {
+        io.FontDefault = menuFont;
+    }
 
     ImGui::StyleColorsDark();
     ImGuiStyle& style = ImGui::GetStyle();
@@ -347,9 +355,9 @@ void OverlayUI::drawMenuWindow(Application& app)
 {
     ImGuiIO& io = ImGui::GetIO();
 
-    const float panelWidth = 460.0f;
+    const float panelWidth = 480.0f;
 	const float panelHeight = 0.0f;
-    ImVec2 panelPos((io.DisplaySize.x - panelWidth) * 0.5f, std::clamp(io.DisplaySize.y - 800.0f, 0.0f, io.DisplaySize.y) * 0.5f);
+    ImVec2 panelPos((io.DisplaySize.x - panelWidth) * 0.5f, std::clamp(io.DisplaySize.y - 900.0f, 0.0f, io.DisplaySize.y) * 0.5f);
     ImGui::SetNextWindowPos(panelPos, ImGuiCond_Always);
     ImGui::SetNextWindowSize(ImVec2(panelWidth, panelHeight));
 
@@ -421,7 +429,7 @@ void OverlayUI::drawMenuWindow(Application& app)
     ImGui::Spacing();
 
     ImGui::TextUnformatted("Video Capture Devices");
-    ImGui::BeginChild("VideoDevices", ImVec2(0.0f, 75), ImGuiChildFlags_Borders);
+    ImGui::BeginChild("VideoDevices", ImVec2(0.0f, 80), ImGuiChildFlags_Borders);
     const std::string& currentVideo = app.settings().videoDeviceMoniker;
     if (videoDevices_.empty())
     {
@@ -652,7 +660,7 @@ void OverlayUI::drawMenuWindow(Application& app)
 	}
     ImGui::PopStyleVar();
     ImGui::TextUnformatted("Audio Capture Input");
-    ImGui::BeginChild("AudioDevices", ImVec2(0.0f, 75), ImGuiChildFlags_Borders);
+    ImGui::BeginChild("AudioDevices", ImVec2(0.0f, 80), ImGuiChildFlags_Borders);
     const std::string& currentAudio = app.settings().audioDeviceMoniker;
     bool useVideoAudio = currentAudio == "@video" || currentAudio.empty();
     if (ImGui::Selectable("Use Video Source Audio", useVideoAudio))

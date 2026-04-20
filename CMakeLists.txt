@@ -15,6 +15,7 @@ add_executable(viewer
     src/DeviceEnumeration.cpp    
     src/AudioPlayback.cpp
     src/OverlayUI.cpp
+    res/udsgr_std_003.cpp
     third_party/imgui/imgui.cpp
     third_party/imgui/imgui_draw.cpp
     third_party/imgui/imgui_tables.cpp
