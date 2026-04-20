@@ -420,6 +420,19 @@ void OverlayUI::drawMenuWindow(Application& app)
     ImGui::Spacing();
 
 	ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(35.0f / 255.0f, 137.0f / 255.0f, 177.0f / 255.0f, 1.0f));
+    if (fullscreen)
+    {
+        ImGui::BeginDisabled();
+    }
+    if (ImGui::Button("Recenter Window"))
+    {
+        app.recenterWindow();
+    }
+    if (fullscreen)
+    {
+        ImGui::EndDisabled();
+    }
+    ImGui::SameLine();
     if (ImGui::Button("Refresh Devices"))
     {
         refreshDeviceLists(app);

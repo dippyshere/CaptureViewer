@@ -46,8 +46,8 @@ private:
     bool shouldUseVideoAudio() const;
     bool shouldEnableCaptureAudio() const;
     void applySourceDimensions(std::uint32_t width, std::uint32_t height);
-    bool resizeWindowToClient(int width, int height);
-    void updateWindowResizeMode();
+    bool resizeWindowToClient(int width, int height, bool preserveClientPosition = false, const POINT* clientOrigin = nullptr);
+    void updateWindowResizeMode(bool preserveClientPosition = false);
     void captureWindowPlacementForPersistence();
     bool applyLockedWindowSize(MINMAXINFO* info) const;
     RECT computeVideoViewport(const RECT& clientRect, bool& valid) const;
@@ -66,6 +66,7 @@ private:
     void setVSyncEnabled(bool enabled);
     void setBorderlessWindowed(bool enabled);
     void setFullscreen(bool enabled);
+    void recenterWindow();
     void requestImmediateRender();
     void processPendingSourceDimensions();
     static std::string toLowerCopy(const std::string& text);

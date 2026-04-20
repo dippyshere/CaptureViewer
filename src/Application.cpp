@@ -236,6 +236,20 @@ LRESULT CALLBACK Application::windowProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
         return DefWindowProc(hwnd, msg, wParam, lParam);
     }
 
+    if (msg == WM_KEYDOWN)
+    {
+        if (wParam == VK_F11)
+        {
+            self->setFullscreen(!self->settings_.videoFullscreen);
+            return 0;
+        }
+        if (wParam == 'M')
+        {
+            self->showSettingsMenu();
+            return 0;
+        }
+    }
+
     if (self->overlay_.processEvent(hwnd, msg, wParam, lParam))
     {
         return 1;
@@ -272,13 +286,6 @@ LRESULT CALLBACK Application::windowProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
         return 0;
     case WM_ACTIVATE:
         return 0;
-    case WM_KEYDOWN:
-        if (wParam == 'M')
-        {
-            self->showSettingsMenu();
-            return 0;
-        }
-        break;
     case WM_GETMINMAXINFO:
         if (self->applyLockedWindowSize(reinterpret_cast<MINMAXINFO*>(lParam)))
         {
@@ -961,7 +968,7 @@ void Application::setBorderlessWindowed(bool enabled)
     settings_.videoBorderlessWindowed = enabled;
     savePersistentSettings();
     logApp(std::string("[App] Borderless windowed -> ") + (settings_.videoBorderlessWindowed ? "enabled" : "disabled"));
-    updateWindowResizeMode();
+    updateWindowResizeMode(true);
     requestImmediateRender();
 }
 
@@ -977,6 +984,38 @@ void Application::setFullscreen(bool enabled)
     logApp(std::string("[App] Fullscreen -> ") + (settings_.videoFullscreen ? "enabled" : "disabled"));
     updateWindowResizeMode();
     requestImmediateRender();
+}
+
+void Application::recenterWindow()
+{
+    if (!hwnd_ || settings_.videoFullscreen)
+    {
+        return;
+    }
+
+    RECT windowRect{};
+    if (!GetWindowRect(hwnd_, &windowRect))
+    {
+        return;
+    }
+
+    const HMONITOR monitor = MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO monitorInfo{};
+    monitorInfo.cbSize = sizeof(monitorInfo);
+    if (!monitor || !GetMonitorInfoW(monitor, &monitorInfo))
+    {
+        return;
+    }
+
+    const int windowWidth = windowRect.right - windowRect.left;
+	const int windowHeight = windowRect.bottom - windowRect.top;
+    const int newX = monitorInfo.rcWork.left + ((monitorInfo.rcWork.right - monitorInfo.rcWork.left) - windowWidth) / 2;
+	const int newY = monitorInfo.rcWork.top + ((monitorInfo.rcWork.bottom - monitorInfo.rcWork.top) - windowHeight) / 2;
+
+    if (SetWindowPos(hwnd_, nullptr, newX, newY, 0, 0, SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOSIZE | SWP_NOSENDCHANGING))
+    {
+        requestImmediateRender();
+    }
 }
 
 void Application::requestImmediateRender()
@@ -1118,7 +1157,7 @@ void Application::applySourceDimensions(std::uint32_t width, std::uint32_t heigh
     }
 }
 
-bool Application::resizeWindowToClient(int width, int height)
+bool Application::resizeWindowToClient(int width, int height, bool preserveClientPosition, const POINT* clientOrigin)
 {
     if (!hwnd_ || width <= 0 || height <= 0)
     {
@@ -1133,12 +1172,36 @@ bool Application::resizeWindowToClient(int width, int height)
 
     const int currentWidth = current.right - current.left;
     const int currentHeight = current.bottom - current.top;
-    if (currentWidth == width && currentHeight == height)
+    if (!preserveClientPosition && currentWidth == width && currentHeight == height)
     {
         return false;
     }
 
-    RECT desired{0, 0, width, height};
+    RECT desired{};
+    if (preserveClientPosition)
+    {
+        POINT origin{};
+        if (clientOrigin)
+        {
+            origin = *clientOrigin;
+        }
+        else
+        {
+            if (!ClientToScreen(hwnd_, &origin))
+            {
+                return false;
+            }
+        }
+        desired.left = origin.x;
+        desired.top = origin.y;
+        desired.right = origin.x + width;
+        desired.bottom = origin.y + height;
+    }
+    else
+    {
+        desired = RECT{0, 0, width, height};
+    }
+
     DWORD style = static_cast<DWORD>(GetWindowLongPtr(hwnd_, GWL_STYLE));
     DWORD exStyle = static_cast<DWORD>(GetWindowLongPtr(hwnd_, GWL_EXSTYLE));
     if (!AdjustWindowRectEx(&desired, style, FALSE, exStyle))
@@ -1149,14 +1212,19 @@ bool Application::resizeWindowToClient(int width, int height)
     const int windowWidth = desired.right - desired.left;
     const int windowHeight = desired.bottom - desired.top;
 
-    RECT currentWindowRect{};
-    if (!GetWindowRect(hwnd_, &currentWindowRect))
+    int windowX = desired.left;
+    int windowY = desired.top;
+    if (!preserveClientPosition)
     {
-        return false;
-    }
+        RECT currentWindowRect{};
+        if (!GetWindowRect(hwnd_, &currentWindowRect))
+        {
+            return false;
+        }
 
-    const int windowX = currentWindowRect.left;
-    const int windowY = currentWindowRect.top;
+        windowX = currentWindowRect.left;
+        windowY = currentWindowRect.top;
+    }
 
     if (!SetWindowPos(hwnd_, nullptr, windowX, windowY, windowWidth, windowHeight,
                       SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOSENDCHANGING))
@@ -1167,11 +1235,22 @@ bool Application::resizeWindowToClient(int width, int height)
     return true;
 }
 
-void Application::updateWindowResizeMode()
+void Application::updateWindowResizeMode(bool preserveClientPosition)
 {
     if (!hwnd_)
     {
         return;
+    }
+
+    POINT preservedClientOrigin{};
+    const POINT* preservedClientOriginPtr = nullptr;
+    if (preserveClientPosition)
+    {
+        RECT clientRect{};
+        if (GetClientRect(hwnd_, &clientRect) && ClientToScreen(hwnd_, &preservedClientOrigin))
+        {
+            preservedClientOriginPtr = &preservedClientOrigin;
+        }
     }
 
     const bool fullscreen = settings_.videoFullscreen;
@@ -1205,7 +1284,7 @@ void Application::updateWindowResizeMode()
 
     const int desiredWidth = lockedClientWidth_ > 0 ? lockedClientWidth_ : kDefaultWidth;
     const int desiredHeight = lockedClientHeight_ > 0 ? lockedClientHeight_ : kDefaultHeight;
-    resizeWindowToClient(desiredWidth, desiredHeight);
+    resizeWindowToClient(desiredWidth, desiredHeight, preserveClientPosition, preservedClientOriginPtr);
 }
 
 bool Application::applyLockedWindowSize(MINMAXINFO* info) const
