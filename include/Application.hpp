@@ -29,6 +29,7 @@ private:
         std::uint32_t height = 0;
         std::uint32_t stride = 0;
         std::uint64_t timestamp100ns = 0;
+        DirectShowCapture::PixelFormat pixelFormat = DirectShowCapture::PixelFormat::BGRA8;
         std::vector<std::uint8_t> data;
     };
 
@@ -52,7 +53,7 @@ private:
     bool applyLockedWindowSize(MINMAXINFO* info) const;
     RECT computeVideoViewport(const RECT& clientRect, bool& valid) const;
     bool uploadLatestFrame();
-    void renderFrame(bool forcePresent);
+    bool renderFrame(bool forcePresent);
     void setAudioPlaybackEnabled(bool enabled);
     void selectVideoDevice(const std::string& moniker);
     void selectAudioDevice(const std::string& moniker);
@@ -107,6 +108,8 @@ private:
     bool suppressCaptureDrivenResize_ = false;
     bool initialMaximizePending_ = false;
     bool initialMaximizeRestoreSeen_ = false;
+    bool restoreWindowPlacementAfterFullscreen_ = false;
     std::atomic<bool> forceRender_{false};
     std::chrono::steady_clock::time_point overlayNextFrameDeadline_;
+    HANDLE frameReadyEvent_ = nullptr;
 };

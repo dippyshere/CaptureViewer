@@ -2,6 +2,7 @@
 
 #include <Windows.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 
@@ -11,6 +12,11 @@
 
 class D3DRenderer {
 public:
+    enum class FrameFormat {
+        BGRA8,
+        NV12,
+    };
+
     D3DRenderer() = default;
     ~D3DRenderer();
 
@@ -20,9 +26,11 @@ public:
     void onResize(UINT width, UINT height);
 
     void uploadFrame(const void* data,
+                     std::size_t dataSize,
                      std::uint32_t stride,
                      std::uint32_t width,
-                     std::uint32_t height);
+                     std::uint32_t height,
+                     FrameFormat format);
 
     void render(const std::function<void(ID3D12GraphicsCommandList*)>& overlayCallback = nullptr);
 
@@ -58,7 +66,8 @@ private:
     void destroyRenderTarget();
     bool ensureFrameResources(std::uint32_t width,
                               std::uint32_t height,
-                              std::uint32_t stride);
+                              std::uint32_t stride,
+                              FrameFormat format);
     void destroyFrameResources();
     void waitForFrame(FrameContext& frameContext);
     void waitForGpu();
@@ -83,8 +92,10 @@ private:
 
     Microsoft::WRL::ComPtr<ID3D12RootSignature> rootSignature_;
     Microsoft::WRL::ComPtr<ID3D12PipelineState> pipelineState_;
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> pipelineStateNv12_;
     Microsoft::WRL::ComPtr<ID3D12PipelineState> pipelineStateGradient_;
     Microsoft::WRL::ComPtr<ID3D12PipelineState> pipelineStateBlur_;
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> pipelineStateNv12Blur_;
 
     Microsoft::WRL::ComPtr<ID3D12Resource> vertexBuffer_;
     Microsoft::WRL::ComPtr<ID3D12Resource> indexBuffer_;
@@ -93,7 +104,10 @@ private:
 
     struct UploadResource {
         Microsoft::WRL::ComPtr<ID3D12Resource> resource;
-        D3D12_PLACED_SUBRESOURCE_FOOTPRINT layout{};
+        D3D12_PLACED_SUBRESOURCE_FOOTPRINT layouts[2]{};
+        UINT rowCounts[2]{};
+        std::uint64_t rowSizes[2]{};
+        UINT subresourceCount = 0;
         std::uint64_t sizeBytes = 0;
         std::uint8_t* cpuAddress = nullptr;
     };
@@ -106,6 +120,8 @@ private:
     UINT srvDescriptorSize_ = 0;
     D3D12_CPU_DESCRIPTOR_HANDLE srvHandleFrameCpu_{};
     D3D12_GPU_DESCRIPTOR_HANDLE srvHandleFrameGpu_{};
+    D3D12_CPU_DESCRIPTOR_HANDLE srvHandleFramePlane1Cpu_{};
+    D3D12_GPU_DESCRIPTOR_HANDLE srvHandleFramePlane1Gpu_{};
     D3D12_CPU_DESCRIPTOR_HANDLE srvHandleImGuiCpu_{};
     D3D12_GPU_DESCRIPTOR_HANDLE srvHandleImGuiGpu_{};
     D3D12_GPU_DESCRIPTOR_HANDLE samplerHandleGpu_{};
@@ -117,6 +133,7 @@ private:
     UINT frameWidth_ = 0;
     UINT frameHeight_ = 0;
     UINT frameStride_ = 0;
+    FrameFormat frameFormat_ = FrameFormat::BGRA8;
     UINT backBufferWidth_ = 0;
     UINT backBufferHeight_ = 0;
 

@@ -31,8 +31,8 @@ You can use this viewer to play through the preview, stream to Discord, or use i
 
 - Press `M` at any time to open an in-window settings menu. Device choices and feature toggles persist in `settings.json` beside the executable.
   - The menu allows you to select the audio and video capture devices, adjust window sizing and display options, and adjust video capture settings like resolution, frame rate, and pixel format.
-- The app enumerates the available capture devices through DirectShow, builds a graph with the Sample Grabber filter, and streams 32-bit BGRA frames into the renderer without extra buffering.
-- Frames are uploaded into a D3D12 texture and drawn over a flip-model swapchain to minimise the presentation queue.
+- The app enumerates the available capture devices through DirectShow, builds a graph with the Sample Grabber filter, and streams frames into the renderer without Sample Grabber buffering.
+- BGRA frames are uploaded directly, NV12 frames stay planar and are converted in a D3D12 pixel shader while drawing.
 - CPU-side double buffering keeps the capture callback decoupled from the render loop while maintaining low latency.
 
 ## Differences from upstream

@@ -80,6 +80,38 @@ float4 main(PSInput input) : SV_Target
 }
 )";
 
+    constexpr const char* kPixelShaderNv12Source = R"(Texture2D yTex : register(t0);
+Texture2D uvTex : register(t1);
+SamplerState frameSampler : register(s0);
+
+struct PSInput
+{
+    float4 position : SV_Position;
+    float2 tex : TEXCOORD0;
+};
+
+float4 SampleNv12(float2 uv)
+{
+    const float y = yTex.Sample(frameSampler, uv).r;
+    const float2 chroma = uvTex.Sample(frameSampler, uv).rg;
+
+    const float c = y - (16.0f / 255.0f);
+    const float u = chroma.x - 0.5f;
+    const float v = chroma.y - 0.5f;
+
+    float3 rgb;
+    rgb.r = 1.164383f * c + 1.596027f * v;
+    rgb.g = 1.164383f * c - 0.391762f * u - 0.812968f * v;
+    rgb.b = 1.164383f * c + 2.017232f * u;
+    return float4(saturate(rgb), 1.0f);
+}
+
+float4 main(PSInput input) : SV_Target
+{
+    return SampleNv12(input.tex);
+}
+)";
+
     constexpr const char* kPixelShaderGradientSource = R"(struct PSInput
 {
     float4 position : SV_Position;
@@ -122,6 +154,76 @@ float4 main(PSInput input) : SV_Target
 {
     uint w = 0, h = 0;
     frameTex.GetDimensions(w, h);
+    float2 texel = float2(1.0f / max(1u, w), 1.0f / max(1u, h));
+
+    const float samplePosModifier = 1.0f;
+
+    float2 level2Offset = texel * (2.0f * samplePosModifier);
+    float2 level3Offset = texel * (3.0f * samplePosModifier);
+    float2 level4Offset = texel * (4.0f * samplePosModifier);
+    float2 level5Offset = texel * (5.0f * samplePosModifier);
+    float2 level6Offset = texel * (6.0f * samplePosModifier);
+
+    float4 l1 = SampleDualKawaseLevel(input.tex, level2Offset);
+    float4 l2 = SampleDualKawaseLevel(input.tex, level3Offset);
+    float4 l3 = SampleDualKawaseLevel(input.tex, level4Offset);
+    float4 l4 = SampleDualKawaseLevel(input.tex, level5Offset);
+    float4 l5 = SampleDualKawaseLevel(input.tex, level6Offset);
+
+    float4 c = l1 * 0.10f + l2 * 0.15f + l3 * 0.25f + l4 * 0.20f + l5 * 0.12f;
+
+    c.rgb *= 0.40f;
+    return c;
+}
+)";
+
+    constexpr const char* kPixelShaderNv12BlurSource = R"(Texture2D yTex : register(t0);
+Texture2D uvTex : register(t1);
+SamplerState frameSampler : register(s0);
+
+struct PSInput
+{
+    float4 position : SV_Position;
+    float2 tex : TEXCOORD0;
+};
+
+float4 SampleNv12(float2 uv)
+{
+    const float y = yTex.Sample(frameSampler, uv).r;
+    const float2 chroma = uvTex.Sample(frameSampler, uv).rg;
+
+    const float c = y - (16.0f / 255.0f);
+    const float u = chroma.x - 0.5f;
+    const float v = chroma.y - 0.5f;
+
+    float3 rgb;
+    rgb.r = 1.164383f * c + 1.596027f * v;
+    rgb.g = 1.164383f * c - 0.391762f * u - 0.812968f * v;
+    rgb.b = 1.164383f * c + 2.017232f * u;
+    return float4(saturate(rgb), 1.0f);
+}
+
+float4 SampleDualKawaseLevel(float2 uv, float2 offset)
+{
+    float4 d = 0.0f;
+    d += SampleNv12(uv + float2( offset.x,  offset.y));
+    d += SampleNv12(uv + float2(-offset.x,  offset.y));
+    d += SampleNv12(uv + float2( offset.x, -offset.y));
+    d += SampleNv12(uv + float2(-offset.x, -offset.y));
+
+    float4 a = 0.0f;
+    a += SampleNv12(uv + float2( offset.x, 0.0f));
+    a += SampleNv12(uv + float2(-offset.x, 0.0f));
+    a += SampleNv12(uv + float2(0.0f,  offset.y));
+    a += SampleNv12(uv + float2(0.0f, -offset.y));
+
+    return (d + a) * (1.0f / 8.0f);
+}
+
+float4 main(PSInput input) : SV_Target
+{
+    uint w = 0, h = 0;
+    yTex.GetDimensions(w, h);
     float2 texel = float2(1.0f / max(1u, w), 1.0f / max(1u, h));
 
     const float samplePosModifier = 1.0f;
@@ -312,7 +414,9 @@ void D3DRenderer::shutdown()
     rtvHeap_.Reset();
 
     pipelineStateBlur_.Reset();
+    pipelineStateNv12Blur_.Reset();
     pipelineStateGradient_.Reset();
+    pipelineStateNv12_.Reset();
     pipelineState_.Reset();
     rootSignature_.Reset();
     indexBuffer_.Reset();
@@ -323,6 +427,7 @@ void D3DRenderer::shutdown()
     device_.Reset();
 
     frameWidth_ = frameHeight_ = frameStride_ = 0;
+    frameFormat_ = FrameFormat::BGRA8;
     backBufferWidth_ = backBufferHeight_ = 0;
     fenceValue_ = 1;
     allowTearing_ = false;
@@ -367,19 +472,26 @@ void D3DRenderer::onResize(UINT width, UINT height)
 
 bool D3DRenderer::ensureFrameResources(std::uint32_t width,
                                        std::uint32_t height,
-                                       std::uint32_t stride)
+                                       std::uint32_t stride,
+                                       FrameFormat format)
 {
     if (!device_ || width == 0 || height == 0)
     {
         return false;
     }
 
-    const std::uint32_t effectiveStride = stride != 0 ? stride : width * 4;
+    if (format == FrameFormat::NV12 && ((width & 1u) != 0 || (height & 1u) != 0))
+    {
+        return false;
+    }
+
+    const std::uint32_t defaultStride = (format == FrameFormat::NV12) ? width : width * 4u;
+    const std::uint32_t effectiveStride = stride != 0 ? stride : defaultStride;
 
     const bool needsRecreate = !frameTexture_
         || frameWidth_ != width
         || frameHeight_ != height
-        || frameStride_ != effectiveStride;
+        || frameFormat_ != format;
 
     if (needsRecreate)
     {
@@ -393,7 +505,7 @@ bool D3DRenderer::ensureFrameResources(std::uint32_t width,
         desc.Height = height;
         desc.DepthOrArraySize = 1;
         desc.MipLevels = 1;
-        desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        desc.Format = (format == FrameFormat::NV12) ? DXGI_FORMAT_NV12 : DXGI_FORMAT_B8G8R8A8_UNORM;
         desc.SampleDesc.Count = 1;
         desc.SampleDesc.Quality = 0;
         desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
@@ -415,18 +527,42 @@ bool D3DRenderer::ensureFrameResources(std::uint32_t width,
             return false;
         }
 
-        device_->CreateShaderResourceView(frameTexture_.Get(), nullptr, srvHandleFrameCpu_);
+        if (format == FrameFormat::NV12)
+        {
+            D3D12_SHADER_RESOURCE_VIEW_DESC yView{};
+            yView.Format = DXGI_FORMAT_R8_UNORM;
+            yView.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+            yView.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+            yView.Texture2D.MostDetailedMip = 0;
+            yView.Texture2D.MipLevels = 1;
+            yView.Texture2D.PlaneSlice = 0;
+            yView.Texture2D.ResourceMinLODClamp = 0.0f;
+            device_->CreateShaderResourceView(frameTexture_.Get(), &yView, srvHandleFrameCpu_);
+
+            D3D12_SHADER_RESOURCE_VIEW_DESC uvView = yView;
+            uvView.Format = DXGI_FORMAT_R8G8_UNORM;
+            uvView.Texture2D.PlaneSlice = 1;
+            device_->CreateShaderResourceView(frameTexture_.Get(), &uvView, srvHandleFramePlane1Cpu_);
+        }
+        else
+        {
+            device_->CreateShaderResourceView(frameTexture_.Get(), nullptr, srvHandleFrameCpu_);
+            device_->CreateShaderResourceView(frameTexture_.Get(), nullptr, srvHandleFramePlane1Cpu_);
+        }
 
         std::uint64_t totalBytes = 0;
-        D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint{};
+        D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprints[2]{};
+        UINT rowCounts[2]{};
+        std::uint64_t rowSizes[2]{};
+        const UINT subresourceCount = (format == FrameFormat::NV12) ? 2u : 1u;
 
         device_->GetCopyableFootprints(&desc,
                                        0,
-                                       1,
+                                       subresourceCount,
                                        0,
-                                       &footprint,
-                                       nullptr,
-                                       nullptr,
+                                       footprints,
+                                       rowCounts,
+                                       rowSizes,
                                        &totalBytes);
 
         D3D12_HEAP_PROPERTIES uploadHeap{};
@@ -461,8 +597,14 @@ bool D3DRenderer::ensureFrameResources(std::uint32_t width,
                 return false;
             }
 
-            upload.layout = footprint;
             upload.sizeBytes = totalBytes;
+            upload.subresourceCount = subresourceCount;
+            for (UINT i = 0; i < subresourceCount; ++i)
+            {
+                upload.layouts[i] = footprints[i];
+                upload.rowCounts[i] = rowCounts[i];
+                upload.rowSizes[i] = rowSizes[i];
+            }
 
             uploadHr = upload.resource->Map(0, nullptr, reinterpret_cast<void**>(&upload.cpuAddress));
             if (FAILED(uploadHr))
@@ -480,6 +622,7 @@ bool D3DRenderer::ensureFrameResources(std::uint32_t width,
     frameWidth_ = width;
     frameHeight_ = height;
     frameStride_ = effectiveStride;
+    frameFormat_ = format;
 
     return true;
 }
@@ -495,7 +638,10 @@ void D3DRenderer::destroyFrameResources()
 
         upload.cpuAddress = nullptr;
         upload.resource.Reset();
-        upload.layout = {};
+        std::fill(std::begin(upload.layouts), std::end(upload.layouts), D3D12_PLACED_SUBRESOURCE_FOOTPRINT{});
+        std::fill(std::begin(upload.rowCounts), std::end(upload.rowCounts), 0u);
+        std::fill(std::begin(upload.rowSizes), std::end(upload.rowSizes), 0ull);
+        upload.subresourceCount = 0;
         upload.sizeBytes = 0;
     }
 
@@ -504,20 +650,24 @@ void D3DRenderer::destroyFrameResources()
     frameWidth_ = 0;
     frameHeight_ = 0;
     frameStride_ = 0;
+    frameFormat_ = FrameFormat::BGRA8;
 }
 
 void D3DRenderer::uploadFrame(const void* data,
+                              std::size_t dataSize,
                               std::uint32_t stride,
                               std::uint32_t width,
-                              std::uint32_t height)
+                              std::uint32_t height,
+                              FrameFormat format)
 {
     if (!device_ || !data || width == 0 || height == 0)
     {
         return;
     }
 
-    const std::uint32_t effectiveStride = stride != 0 ? stride : width * 4;
-    if (!ensureFrameResources(width, height, effectiveStride))
+    const std::uint32_t defaultStride = (format == FrameFormat::NV12) ? width : width * 4u;
+    const std::uint32_t effectiveStride = stride != 0 ? stride : defaultStride;
+    if (!ensureFrameResources(width, height, effectiveStride, format))
     {
         return;
     }
@@ -532,32 +682,68 @@ void D3DRenderer::uploadFrame(const void* data,
     waitForFrame(frameContexts_[uploadIndex]);
 
     UploadResource& upload = frameUploads_[uploadIndex];
-    if (!upload.cpuAddress || upload.layout.Footprint.RowPitch == 0)
+    if (!upload.cpuAddress || upload.subresourceCount == 0)
     {
         return;
     }
 
     const auto* sourceBytes = static_cast<const std::uint8_t*>(data);
-    const std::uint32_t bytesPerPixel = 4;
-    const std::size_t rowCopySize = static_cast<std::size_t>(frameWidth_) * bytesPerPixel;
-    if (effectiveStride < rowCopySize)
+
+    auto copyPlane = [&](UINT subresourceIndex, std::size_t sourcePlaneOffset, std::uint32_t sourceStride) {
+        const D3D12_PLACED_SUBRESOURCE_FOOTPRINT& layout = upload.layouts[subresourceIndex];
+        const UINT rowCount = upload.rowCounts[subresourceIndex];
+        const std::size_t rowSize = static_cast<std::size_t>(upload.rowSizes[subresourceIndex]);
+        if (layout.Footprint.RowPitch == 0 || rowCount == 0 || rowSize == 0)
+        {
+            return false;
+        }
+        if (sourceStride < rowSize)
+        {
+            return false;
+        }
+
+        std::uint8_t* dstBase = upload.cpuAddress + layout.Offset;
+        const std::size_t dstPitch = layout.Footprint.RowPitch;
+
+        for (UINT row = 0; row < rowCount; ++row)
+        {
+            const std::size_t srcOffset = sourcePlaneOffset + static_cast<std::size_t>(row) * sourceStride;
+            std::uint8_t* dstRow = dstBase + static_cast<std::size_t>(row) * dstPitch;
+
+            if (srcOffset >= dataSize)
+            {
+                std::memset(dstRow, 0, rowSize);
+                continue;
+            }
+
+            const std::size_t available = dataSize - srcOffset;
+            const std::size_t copyBytes = std::min(rowSize, available);
+            std::memcpy(dstRow, sourceBytes + srcOffset, copyBytes);
+            if (copyBytes < rowSize)
+            {
+                std::memset(dstRow + copyBytes, 0, rowSize - copyBytes);
+            }
+        }
+
+        return true;
+    };
+
+    bool copied = false;
+    if (format == FrameFormat::NV12)
     {
-        return;
+        const std::size_t uvOffset = static_cast<std::size_t>(effectiveStride) * height;
+        copied = copyPlane(0, 0, effectiveStride)
+            && upload.subresourceCount >= 2
+            && copyPlane(1, uvOffset, effectiveStride);
+    }
+    else
+    {
+        copied = copyPlane(0, 0, effectiveStride);
     }
 
-    const std::size_t copyBytes = rowCopySize;
-    std::uint8_t* dstBase = upload.cpuAddress + upload.layout.Offset;
-    const std::size_t dstPitch = upload.layout.Footprint.RowPitch;
-
-    for (std::uint32_t row = 0; row < height; ++row)
+    if (!copied)
     {
-        const std::size_t srcOffset = static_cast<std::size_t>(row) * effectiveStride;
-        std::uint8_t* dstRow = dstBase + static_cast<std::size_t>(row) * dstPitch;
-        std::memcpy(dstRow, sourceBytes + srcOffset, copyBytes);
-        if (copyBytes < dstPitch)
-        {
-            std::memset(dstRow + copyBytes, 0, dstPitch - copyBytes);
-        }
+        return;
     }
 
     pendingUpload_[uploadIndex] = true;
@@ -604,14 +790,17 @@ void D3DRenderer::render(const std::function<void(ID3D12GraphicsCommandList*)>& 
         D3D12_TEXTURE_COPY_LOCATION dst{};
         dst.pResource = frameTexture_.Get();
         dst.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-        dst.SubresourceIndex = 0;
 
         D3D12_TEXTURE_COPY_LOCATION src{};
         src.pResource = upload.resource.Get();
         src.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
-        src.PlacedFootprint = upload.layout;
 
-        commandList_->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+        for (UINT subresource = 0; subresource < upload.subresourceCount; ++subresource)
+        {
+            dst.SubresourceIndex = subresource;
+            src.PlacedFootprint = upload.layouts[subresource];
+            commandList_->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+        }
 
         D3D12_RESOURCE_BARRIER toShader{};
         toShader.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
@@ -628,8 +817,8 @@ void D3DRenderer::render(const std::function<void(ID3D12GraphicsCommandList*)>& 
         if (!loggedGpuPixels_ && upload.cpuAddress)
         {
             const std::uint32_t bytesPerPixel = 4;
-            const std::size_t dstPitch = upload.layout.Footprint.RowPitch;
-            const std::uint8_t* pixels = upload.cpuAddress + upload.layout.Offset;
+            const std::size_t dstPitch = upload.layouts[0].Footprint.RowPitch;
+            const std::uint8_t* pixels = upload.cpuAddress + upload.layouts[0].Offset;
 
             auto logPixel = [&](const char* label, std::uint32_t row, std::uint32_t col) {
                 if (row < frameHeight_ && col < frameWidth_)
@@ -683,10 +872,19 @@ void D3DRenderer::render(const std::function<void(ID3D12GraphicsCommandList*)>& 
     commandList_->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 
     commandList_->SetGraphicsRootSignature(rootSignature_.Get());
-    ID3D12PipelineState* activePso = pipelineState_.Get();
-    if (blurEnabled_ && pipelineStateBlur_)
+    ID3D12PipelineState* activePso = (frameFormat_ == FrameFormat::NV12 && pipelineStateNv12_)
+        ? pipelineStateNv12_.Get()
+        : pipelineState_.Get();
+    if (blurEnabled_)
     {
-        activePso = pipelineStateBlur_.Get();
+        if (frameFormat_ == FrameFormat::NV12 && pipelineStateNv12Blur_)
+        {
+            activePso = pipelineStateNv12Blur_.Get();
+        }
+        else if (pipelineStateBlur_)
+        {
+            activePso = pipelineStateBlur_.Get();
+        }
     }
     commandList_->SetPipelineState(activePso);
 
@@ -966,7 +1164,7 @@ bool D3DRenderer::createPipelineResources()
     }
 
     D3D12_DESCRIPTOR_HEAP_DESC srvDesc{};
-    srvDesc.NumDescriptors = 2;
+    srvDesc.NumDescriptors = 3;
     srvDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
     srvDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
     if (FAILED(device_->CreateDescriptorHeap(&srvDesc, IID_PPV_ARGS(srvHeap_.GetAddressOf()))))
@@ -977,10 +1175,14 @@ bool D3DRenderer::createPipelineResources()
     srvDescriptorSize_ = device_->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     srvHandleFrameCpu_ = srvHeap_->GetCPUDescriptorHandleForHeapStart();
     srvHandleFrameGpu_ = srvHeap_->GetGPUDescriptorHandleForHeapStart();
+    srvHandleFramePlane1Cpu_ = srvHandleFrameCpu_;
+    srvHandleFramePlane1Cpu_.ptr += srvDescriptorSize_;
+    srvHandleFramePlane1Gpu_ = srvHandleFrameGpu_;
+    srvHandleFramePlane1Gpu_.ptr += srvDescriptorSize_;
     srvHandleImGuiCpu_ = srvHandleFrameCpu_;
-    srvHandleImGuiCpu_.ptr += srvDescriptorSize_;
+    srvHandleImGuiCpu_.ptr += static_cast<SIZE_T>(srvDescriptorSize_) * 2u;
     srvHandleImGuiGpu_ = srvHandleFrameGpu_;
-    srvHandleImGuiGpu_.ptr += srvDescriptorSize_;
+    srvHandleImGuiGpu_.ptr += static_cast<UINT64>(srvDescriptorSize_) * 2u;
 
     D3D12_DESCRIPTOR_HEAP_DESC samplerDesc{};
     samplerDesc.NumDescriptors = 1;
@@ -1077,8 +1279,10 @@ bool D3DRenderer::createPipelineResources()
 
     ComPtr<ID3DBlob> vsBlob;
     ComPtr<ID3DBlob> psBlob;
+    ComPtr<ID3DBlob> psNv12Blob;
     ComPtr<ID3DBlob> psGradientBlob;
     ComPtr<ID3DBlob> psBlurBlob;
+    ComPtr<ID3DBlob> psNv12BlurBlob;
     ComPtr<ID3DBlob> errorBlob;
 
     UINT compileFlags = D3DCOMPILE_ENABLE_STRICTNESS;
@@ -1120,6 +1324,23 @@ bool D3DRenderer::createPipelineResources()
     }
 
     errorBlob.Reset();
+    if (FAILED(D3DCompile(kPixelShaderNv12Source,
+                          std::strlen(kPixelShaderNv12Source),
+                          nullptr,
+                          nullptr,
+                          nullptr,
+                          "main",
+                          "ps_5_0",
+                          compileFlags,
+                          0,
+                          psNv12Blob.GetAddressOf(),
+                          errorBlob.GetAddressOf())))
+    {
+        logMessage("[Renderer] NV12 pixel shader compilation failed");
+        return false;
+    }
+
+    errorBlob.Reset();
     if (FAILED(D3DCompile(kPixelShaderGradientSource,
                           std::strlen(kPixelShaderGradientSource),
                           nullptr,
@@ -1133,6 +1354,23 @@ bool D3DRenderer::createPipelineResources()
                           errorBlob.GetAddressOf())))
     {
         logMessage("[Renderer] Gradient shader compilation failed");
+        return false;
+    }
+
+    errorBlob.Reset();
+    if (FAILED(D3DCompile(kPixelShaderNv12BlurSource,
+                          std::strlen(kPixelShaderNv12BlurSource),
+                          nullptr,
+                          nullptr,
+                          nullptr,
+                          "main",
+                          "ps_5_0",
+                          compileFlags,
+                          0,
+                          psNv12BlurBlob.GetAddressOf(),
+                          errorBlob.GetAddressOf())))
+    {
+        logMessage("[Renderer] NV12 blur shader compilation failed");
         return false;
     }
 
@@ -1155,7 +1393,7 @@ bool D3DRenderer::createPipelineResources()
 
     D3D12_DESCRIPTOR_RANGE srvRange{};
     srvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-    srvRange.NumDescriptors = 1;
+    srvRange.NumDescriptors = 2;
     srvRange.BaseShaderRegister = 0;
     srvRange.RegisterSpace = 0;
     srvRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
@@ -1265,6 +1503,15 @@ bool D3DRenderer::createPipelineResources()
         return false;
     }
 
+    psoDesc.PS = {psNv12Blob->GetBufferPointer(), psNv12Blob->GetBufferSize()};
+    hr = device_->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(pipelineStateNv12_.GetAddressOf()));
+    if (FAILED(hr))
+    {
+        logFailure("CreateGraphicsPipelineState (nv12)", hr);
+        logInfoQueueMessages(device_.Get(), "CreateGraphicsPipelineState (nv12)");
+        return false;
+    }
+
     psoDesc.PS = {psGradientBlob->GetBufferPointer(), psGradientBlob->GetBufferSize()};
     hr = device_->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(pipelineStateGradient_.GetAddressOf()));
     if (FAILED(hr))
@@ -1280,6 +1527,15 @@ bool D3DRenderer::createPipelineResources()
     {
         logFailure("CreateGraphicsPipelineState (blur)", hr);
         logInfoQueueMessages(device_.Get(), "CreateGraphicsPipelineState (blur)");
+        return false;
+    }
+
+    psoDesc.PS = {psNv12BlurBlob->GetBufferPointer(), psNv12BlurBlob->GetBufferSize()};
+    hr = device_->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(pipelineStateNv12Blur_.GetAddressOf()));
+    if (FAILED(hr))
+    {
+        logFailure("CreateGraphicsPipelineState (nv12 blur)", hr);
+        logInfoQueueMessages(device_.Get(), "CreateGraphicsPipelineState (nv12 blur)");
         return false;
     }
 

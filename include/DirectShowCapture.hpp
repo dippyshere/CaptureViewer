@@ -11,6 +11,7 @@ class DirectShowCapture {
 public:
     enum class PixelFormat {
         BGRA8,
+        NV12,
     };
 
     enum class VideoFormatPreference {
@@ -26,6 +27,7 @@ public:
         std::uint64_t timestamp100ns{};
         const std::uint8_t* data{};
         std::size_t dataSize{};
+        PixelFormat pixelFormat = PixelFormat::BGRA8;
         bool bottomUp{};
         std::uint32_t sampleWidth{};
         std::uint32_t sampleHeight{};

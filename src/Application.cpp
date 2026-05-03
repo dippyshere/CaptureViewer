@@ -65,17 +65,88 @@ namespace
     {
         std::ofstream("viewer.log", std::ios::app) << message << '\n';
     }
+
+    std::size_t frameBufferBytes(DirectShowCapture::PixelFormat format,
+                                 std::uint32_t stride,
+                                 std::uint32_t height)
+    {
+        const std::size_t rowStride = static_cast<std::size_t>(stride);
+        switch (format)
+        {
+        case DirectShowCapture::PixelFormat::NV12:
+            return rowStride * height + rowStride * ((height + 1u) / 2u);
+        case DirectShowCapture::PixelFormat::BGRA8:
+        default:
+            return rowStride * height;
+        }
+    }
+
+    D3DRenderer::FrameFormat toRendererFormat(DirectShowCapture::PixelFormat format)
+    {
+        switch (format)
+        {
+        case DirectShowCapture::PixelFormat::NV12:
+            return D3DRenderer::FrameFormat::NV12;
+        case DirectShowCapture::PixelFormat::BGRA8:
+        default:
+            return D3DRenderer::FrameFormat::BGRA8;
+        }
+    }
+
+    RECT clampWindowRectToNearestWorkArea(const RECT& rect)
+    {
+        RECT result = rect;
+        const int width = result.right - result.left;
+        const int height = result.bottom - result.top;
+        if (width <= 0 || height <= 0)
+        {
+            return result;
+        }
+
+        const HMONITOR monitor = MonitorFromRect(&result, MONITOR_DEFAULTTONEAREST);
+        MONITORINFO monitorInfo{};
+        monitorInfo.cbSize = sizeof(monitorInfo);
+        if (!monitor || !GetMonitorInfoW(monitor, &monitorInfo))
+        {
+            return result;
+        }
+
+        const RECT& work = monitorInfo.rcWork;
+        const int workWidth = work.right - work.left;
+        const int workHeight = work.bottom - work.top;
+        const int clampedWidth = std::min(width, workWidth);
+        const int clampedHeight = std::min(height, workHeight);
+
+        result.left = std::clamp(result.left, work.left, work.right - clampedWidth);
+        result.top = std::clamp(result.top, work.top, work.bottom - clampedHeight);
+        result.right = result.left + width;
+        result.bottom = result.top + height;
+        return result;
+    }
 }
 
-Application::Application() = default;
+Application::Application()
+{
+    frameReadyEvent_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+}
+
 Application::~Application()
 {
     running_ = false;
+    if (frameReadyEvent_)
+    {
+        SetEvent(frameReadyEvent_);
+    }
     audioPlayback_.stop();
     directShowCapture_.stop();
     renderer_.shutdown();
     captureWindowPlacementForPersistence();
     destroyWindow();
+    if (frameReadyEvent_)
+    {
+        CloseHandle(frameReadyEvent_);
+        frameReadyEvent_ = nullptr;
+    }
 }
 
 int Application::run()
@@ -261,6 +332,10 @@ LRESULT CALLBACK Application::windowProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
     {
         const UINT width = LOWORD(lParam);
         const UINT height = HIWORD(lParam);
+        if (wParam == SIZE_MINIMIZED || width == 0 || height == 0)
+        {
+            return 0;
+        }
         if (wParam == SIZE_MAXIMIZED)
         {
             self->suppressCaptureDrivenResize_ = true;
@@ -329,7 +404,7 @@ LRESULT CALLBACK Application::windowProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
         PostQuitMessage(0);
         return 0;
     case WM_SETCURSOR:
-        if (LOWORD(lParam) == HTCLIENT)
+        if (LOWORD(lParam) == HTCLIENT && !self->overlay_.isMenuVisible())
         {
             SetCursor(nullptr);
             return TRUE;
@@ -412,6 +487,14 @@ bool Application::createWindow(int width, int height)
                 windowY = monitorInfo.rcMonitor.top + (monitorInfo.rcMonitor.bottom - monitorInfo.rcMonitor.top - windowHeight) / 2;
             }
         }
+    }
+
+    if (windowX != CW_USEDEFAULT && windowY != CW_USEDEFAULT)
+    {
+        const RECT clamped = clampWindowRectToNearestWorkArea(
+            RECT{windowX, windowY, windowX + windowWidth, windowY + windowHeight});
+        windowX = clamped.left;
+        windowY = clamped.top;
     }
 
     hwnd_ = CreateWindowExW(
@@ -500,10 +583,12 @@ void Application::handleFrame(const DirectShowCapture::Frame& frame)
 
     const std::uint32_t frameWidth = frame.width;
     const std::uint32_t frameHeight = frame.height;
-    const std::uint32_t stride = frame.stride != 0 ? frame.stride : frameWidth * 4;
+    const std::uint32_t defaultStride = (frame.pixelFormat == DirectShowCapture::PixelFormat::NV12) ? frameWidth : frameWidth * 4u;
+    const std::uint32_t stride = frame.stride != 0 ? frame.stride : defaultStride;
 
     dst.width = frameWidth;
     dst.height = frameHeight;
+    dst.pixelFormat = frame.pixelFormat;
 
     const std::uint32_t knownWidth = currentSourceWidth_.load(std::memory_order_acquire);
     const std::uint32_t knownHeight = currentSourceHeight_.load(std::memory_order_acquire);
@@ -516,7 +601,7 @@ void Application::handleFrame(const DirectShowCapture::Frame& frame)
         sourceChangePending_.store(true, std::memory_order_release);
     }
 
-    const std::size_t requiredBytes = static_cast<std::size_t>(stride) * frameHeight;
+    const std::size_t requiredBytes = frameBufferBytes(frame.pixelFormat, stride, frameHeight);
     if (frame.dataSize < requiredBytes)
     {
         logApp("[App] Warning: frame data shorter than expected (" + std::to_string(frame.dataSize) + " < " + std::to_string(requiredBytes) + ")");
@@ -532,15 +617,11 @@ void Application::handleFrame(const DirectShowCapture::Frame& frame)
         const auto* srcRows = static_cast<const std::uint8_t*>(frame.data);
         if (!bottomUp)
         {
-            for (std::uint32_t y = 0; y < frameHeight; ++y)
+            const std::size_t copyBytes = std::min(requiredBytes, frame.dataSize);
+            std::memcpy(dst.data.data(), srcRows, copyBytes);
+            if (copyBytes < requiredBytes)
             {
-                const std::size_t offset = static_cast<std::size_t>(y) * stride;
-                const std::size_t copyBytes = std::min<std::size_t>(stride, frame.dataSize - offset);
-                std::memcpy(dst.data.data() + offset, srcRows + offset, copyBytes);
-                if (copyBytes < stride)
-                {
-                    std::memset(dst.data.data() + offset + copyBytes, 0, stride - copyBytes);
-                }
+                std::memset(dst.data.data() + copyBytes, 0, requiredBytes - copyBytes);
             }
         }
         else
@@ -550,8 +631,11 @@ void Application::handleFrame(const DirectShowCapture::Frame& frame)
                 const std::uint32_t srcIndex = frameHeight - 1 - y;
                 const std::size_t srcOffset = static_cast<std::size_t>(srcIndex) * stride;
                 const std::size_t dstOffset = static_cast<std::size_t>(y) * stride;
-                const std::size_t copyBytes = std::min<std::size_t>(stride, frame.dataSize - srcOffset);
-                std::memcpy(dst.data.data() + dstOffset, srcRows + srcOffset, copyBytes);
+                const std::size_t copyBytes = srcOffset < frame.dataSize ? std::min<std::size_t>(stride, frame.dataSize - srcOffset) : 0;
+                if (copyBytes > 0)
+                {
+                    std::memcpy(dst.data.data() + dstOffset, srcRows + srcOffset, copyBytes);
+                }
                 if (copyBytes < stride)
                 {
                     std::memset(dst.data.data() + dstOffset + copyBytes, 0, stride - copyBytes);
@@ -565,7 +649,7 @@ void Application::handleFrame(const DirectShowCapture::Frame& frame)
     }
 
     static std::atomic<bool> loggedPixels{false};
-    if (!loggedPixels.exchange(true))
+    if (dst.pixelFormat == DirectShowCapture::PixelFormat::BGRA8 && !loggedPixels.exchange(true))
     {
         logApp("[App] Stored frame size=" + std::to_string(dst.data.size()) + " stride=" + std::to_string(dst.stride));
         auto logPixel = [&](const char* label, std::size_t row, std::size_t col) {
@@ -593,6 +677,10 @@ void Application::handleFrame(const DirectShowCapture::Frame& frame)
 
     frontBufferIndex_ = backIndex;
     frameCounter_.fetch_add(1, std::memory_order_acq_rel);
+    if (frameReadyEvent_)
+    {
+        SetEvent(frameReadyEvent_);
+    }
 
     static std::atomic<bool> logged{false};
     if (!logged.exchange(true))
@@ -668,7 +756,23 @@ void Application::renderLoop()
         else
         {
             overlayNextFrameDeadline_ = std::chrono::steady_clock::time_point{};
-            renderFrame(false);
+            const bool didRender = renderFrame(false);
+            if (!didRender)
+            {
+                if (frameReadyEvent_)
+                {
+                    HANDLE handles[] = {frameReadyEvent_};
+                    MsgWaitForMultipleObjectsEx(1,
+                                                handles,
+                                                INFINITE,
+                                                QS_ALLINPUT,
+                                                MWMO_INPUTAVAILABLE);
+                }
+                else
+                {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                }
+            }
         }
     }
 }
@@ -1025,6 +1129,16 @@ void Application::setFullscreen(bool enabled)
         return;
     }
 
+    if (enabled)
+    {
+        captureWindowPlacementForPersistence();
+        restoreWindowPlacementAfterFullscreen_ = false;
+    }
+    else
+    {
+        restoreWindowPlacementAfterFullscreen_ = true;
+    }
+
     settings_.videoFullscreen = enabled;
     savePersistentSettings();
     logApp(std::string("[App] Fullscreen -> ") + (settings_.videoFullscreen ? "enabled" : "disabled"));
@@ -1067,6 +1181,10 @@ void Application::recenterWindow()
 void Application::requestImmediateRender()
 {
     forceRender_.store(true, std::memory_order_release);
+    if (frameReadyEvent_)
+    {
+        SetEvent(frameReadyEvent_);
+    }
 }
 
 bool Application::uploadLatestFrame()
@@ -1089,7 +1207,12 @@ bool Application::uploadLatestFrame()
         return false;
     }
 
-    renderer_.uploadFrame(src.data.data(), src.stride, src.width, src.height);
+    renderer_.uploadFrame(src.data.data(),
+                          src.data.size(),
+                          src.stride,
+                          src.width,
+                          src.height,
+                          toRendererFormat(src.pixelFormat));
     lastPresentedFrame_ = latest;
     return true;
 }
@@ -1112,8 +1235,13 @@ void Application::processPendingSourceDimensions()
     sourceChangePending_.store(false, std::memory_order_release);
 }
 
-void Application::renderFrame(bool forcePresent)
+bool Application::renderFrame(bool forcePresent)
 {
+    if (hwnd_ && IsIconic(hwnd_))
+    {
+        return false;
+    }
+
     processPendingSourceDimensions();
 
     const bool menuVisible = overlay_.isMenuVisible();
@@ -1159,11 +1287,10 @@ void Application::renderFrame(bool forcePresent)
         renderer_.render([&](ID3D12GraphicsCommandList* cmdList) {
             overlay_.render(cmdList);
         });
+        return true;
     }
-    else if (!forcePresent)
-    {
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
+
+    return false;
 }
 
 std::string Application::toLowerCopy(const std::string& text)
@@ -1338,8 +1465,42 @@ void Application::updateWindowResizeMode(bool preserveClientPosition)
         return;
     }
 
+    if (restoreWindowPlacementAfterFullscreen_ && settings_.windowWasMaximized)
+    {
+        ShowWindow(hwnd_, SW_SHOWMAXIMIZED);
+        restoreWindowPlacementAfterFullscreen_ = false;
+        return;
+    }
+
     const int desiredWidth = lockedClientWidth_ > 0 ? lockedClientWidth_ : kDefaultWidth;
     const int desiredHeight = lockedClientHeight_ > 0 ? lockedClientHeight_ : kDefaultHeight;
+    if (restoreWindowPlacementAfterFullscreen_ && settings_.hasWindowPlacement)
+    {
+        RECT desired{0, 0, desiredWidth, desiredHeight};
+        DWORD style = static_cast<DWORD>(GetWindowLongPtr(hwnd_, GWL_STYLE));
+        DWORD exStyle = static_cast<DWORD>(GetWindowLongPtr(hwnd_, GWL_EXSTYLE));
+        if (AdjustWindowRectEx(&desired, style, FALSE, exStyle))
+        {
+            const int windowWidth = desired.right - desired.left;
+            const int windowHeight = desired.bottom - desired.top;
+            RECT target{settings_.windowPosX,
+                        settings_.windowPosY,
+                        settings_.windowPosX + windowWidth,
+                        settings_.windowPosY + windowHeight};
+            target = clampWindowRectToNearestWorkArea(target);
+            SetWindowPos(hwnd_,
+                         HWND_NOTOPMOST,
+                         target.left,
+                         target.top,
+                         windowWidth,
+                         windowHeight,
+                         SWP_NOACTIVATE | SWP_NOSENDCHANGING | SWP_FRAMECHANGED);
+            restoreWindowPlacementAfterFullscreen_ = false;
+            return;
+        }
+        restoreWindowPlacementAfterFullscreen_ = false;
+    }
+
     resizeWindowToClient(desiredWidth, desiredHeight, preserveClientPosition, preservedClientOriginPtr);
 }
 
@@ -1566,13 +1727,17 @@ void Application::captureWindowPlacementForPersistence()
 
     if (maximized)
     {
-        RECT normalClientRect{0, 0, normalRect.right - normalRect.left, normalRect.bottom - normalRect.top};
+        RECT frameMargins{0, 0, 0, 0};
         DWORD style = static_cast<DWORD>(GetWindowLongPtr(hwnd_, GWL_STYLE));
         DWORD exStyle = static_cast<DWORD>(GetWindowLongPtr(hwnd_, GWL_EXSTYLE));
-        if (AdjustWindowRectEx(&normalClientRect, style, FALSE, exStyle))
+        if (AdjustWindowRectEx(&frameMargins, style, FALSE, exStyle))
         {
-            const int normalClientWidth = normalClientRect.right - normalClientRect.left;
-            const int normalClientHeight = normalClientRect.bottom - normalClientRect.top;
+            const int windowWidth = normalRect.right - normalRect.left;
+            const int windowHeight = normalRect.bottom - normalRect.top;
+            const int frameWidth = frameMargins.right - frameMargins.left;
+            const int frameHeight = frameMargins.bottom - frameMargins.top;
+            const int normalClientWidth = windowWidth - frameWidth;
+            const int normalClientHeight = windowHeight - frameHeight;
             settings_.windowClientWidth = static_cast<unsigned int>(std::max(1, normalClientWidth));
             settings_.windowClientHeight = static_cast<unsigned int>(std::max(1, normalClientHeight));
         }

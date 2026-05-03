@@ -38,13 +38,21 @@ target_include_directories(viewer
 )
 
 if(MSVC)
-    target_compile_options(viewer PRIVATE /permissive- /Zc:__cplusplus /MP /GL)
-    target_compile_definitions(viewer PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX /O2 /GL)
+    target_compile_options(viewer PRIVATE
+        /permissive-
+        /Zc:__cplusplus
+        /MP
+        $<$<CONFIG:Release>:/O2>
+        $<$<CONFIG:Release>:/GL>
+    )
+    target_link_options(viewer PRIVATE $<$<CONFIG:Release>:/LTCG>)
+    target_compile_definitions(viewer PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
 endif()
 
 target_link_libraries(viewer
     PRIVATE
         d3d12
+        d3dcompiler
         dxgi
         strmiids
 )

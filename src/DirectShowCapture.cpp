@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <exception>
 #include <fstream>
@@ -147,10 +148,6 @@ namespace
         return "Other";
     }
 
-    std::uint8_t clampByte(int value)
-    {
-        return static_cast<std::uint8_t>(std::clamp(value, 0, 255));
-    }
 }
 
 struct ISampleGrabberCB : public IUnknown
@@ -599,7 +596,7 @@ struct DirectShowCaptureImpl
 
         callback = new SampleGrabberCallback(this);
         throwIfFailed(sampleGrabber->SetOneShot(FALSE), "Failed to configure Sample Grabber");
-        throwIfFailed(sampleGrabber->SetBufferSamples(TRUE), "Failed to configure Sample Grabber buffering");
+        throwIfFailed(sampleGrabber->SetBufferSamples(FALSE), "Failed to disable Sample Grabber buffering");
         throwIfFailed(sampleGrabber->SetCallback(callback, 1), "Failed to set Sample Grabber callback");
 
         ComPtr<IAMStreamConfig> streamConfig;
@@ -615,7 +612,7 @@ struct DirectShowCaptureImpl
                                                      IID_PPV_ARGS(streamConfig.GetAddressOf()));
         }
 
-        GUID requestedSubtype = kPreferredVideoSubtypeRgb24;
+        GUID requestedSubtype = kPreferredVideoSubtypeXrgb;
         switch (requestedFormatPreference)
         {
         case DirectShowCapture::VideoFormatPreference::NV12:
@@ -624,7 +621,7 @@ struct DirectShowCaptureImpl
         case DirectShowCapture::VideoFormatPreference::Auto:
         case DirectShowCapture::VideoFormatPreference::XRGB:
         default:
-            requestedSubtype = kPreferredVideoSubtypeRgb24;
+            requestedSubtype = kPreferredVideoSubtypeXrgb;
             break;
         }
 
@@ -670,6 +667,12 @@ struct DirectShowCaptureImpl
 
         logSampleGrabberFormat();
 
+        ComPtr<IMediaFilter> mediaFilter;
+        if (SUCCEEDED(graph.As(&mediaFilter)) && mediaFilter)
+        {
+            mediaFilter->SetSyncSource(nullptr);
+        }
+
         throwIfFailed(graph->QueryInterface(IID_PPV_ARGS(&control)), "Failed to query IMediaControl");
     }
 
@@ -695,20 +698,20 @@ struct DirectShowCaptureImpl
             switch (requestedFormatPreference)
             {
             case DirectShowCapture::VideoFormatPreference::XRGB:
-                if (isSubtype(subtype, kPreferredVideoSubtypeRgb24)) return 400;
-                if (isXrgb32CompatibleSubtype(subtype)) return 300;
-                if (isSubtype(subtype, kPreferredVideoSubtypeNv12)) return 200;
+                if (isXrgb32CompatibleSubtype(subtype)) return 450;
+                if (isSubtype(subtype, kPreferredVideoSubtypeRgb24)) return 350;
+                if (isSubtype(subtype, kPreferredVideoSubtypeNv12)) return 250;
                 return 100;
             case DirectShowCapture::VideoFormatPreference::NV12:
-                if (isSubtype(subtype, kPreferredVideoSubtypeNv12)) return 400;
-                if (isSubtype(subtype, kPreferredVideoSubtypeRgb24)) return 300;
-                if (isXrgb32CompatibleSubtype(subtype)) return 250;
+                if (isSubtype(subtype, kPreferredVideoSubtypeNv12)) return 450;
+                if (isXrgb32CompatibleSubtype(subtype)) return 300;
+                if (isSubtype(subtype, kPreferredVideoSubtypeRgb24)) return 250;
                 return 100;
             case DirectShowCapture::VideoFormatPreference::Auto:
             default:
-                if (isSubtype(subtype, kPreferredVideoSubtypeRgb24)) return 400;
-                if (isSubtype(subtype, kPreferredVideoSubtypeNv12)) return 300;
-                if (isXrgb32CompatibleSubtype(subtype)) return 250;
+                if (isXrgb32CompatibleSubtype(subtype)) return 450;
+                if (isSubtype(subtype, kPreferredVideoSubtypeNv12)) return 400;
+                if (isSubtype(subtype, kPreferredVideoSubtypeRgb24)) return 300;
                 return 100;
             }
         };
@@ -934,6 +937,7 @@ struct DirectShowCaptureImpl
         std::uint32_t stride = width;
         bool isBottomUp = biHeight > 0;
         ActiveSubtype subtypeState = ActiveSubtype::Unknown;
+        const DWORD imageSize = vih.bmiHeader.biSizeImage;
 
         if (isXrgb32CompatibleSubtype(subtype))
         {
@@ -942,12 +946,21 @@ struct DirectShowCaptureImpl
         }
         else if (isSubtype(subtype, kPreferredVideoSubtypeRgb24))
         {
-            stride = width * 3;
+            stride = (width * 3u + 3u) & ~3u;
             subtypeState = ActiveSubtype::RGB24;
         }
         else if (isSubtype(subtype, kPreferredVideoSubtypeNv12))
         {
             stride = width;
+            const std::uint32_t totalRows = height + ((height + 1u) / 2u);
+            if (imageSize > 0 && totalRows > 0)
+            {
+                const std::uint32_t inferredStride = imageSize / totalRows;
+                if (inferredStride >= width)
+                {
+                    stride = inferredStride;
+                }
+            }
             isBottomUp = false;
             subtypeState = ActiveSubtype::NV12;
         }
@@ -983,50 +996,6 @@ struct DirectShowCaptureImpl
             contentRight = static_cast<std::uint32_t>(active.right);
             contentBottom = static_cast<std::uint32_t>(active.bottom);
             activeFrameRate100 = nominalFrameRate100;
-        }
-    }
-
-    void convertNv12ToBgra(const BYTE* source, std::size_t sourceSize)
-    {
-        const std::size_t yPlaneBytes = static_cast<std::size_t>(frameStride) * frameHeight;
-        const std::size_t uvPlaneBytes = static_cast<std::size_t>(frameStride) * (frameHeight / 2);
-        if (sourceSize < yPlaneBytes + uvPlaneBytes)
-        {
-            convertedBuffer.clear();
-            return;
-        }
-
-        const BYTE* yPlane = source;
-        const BYTE* uvPlane = source + yPlaneBytes;
-        const std::size_t outStride = static_cast<std::size_t>(frameWidth) * 4;
-        convertedBuffer.resize(outStride * frameHeight);
-
-        for (std::uint32_t y = 0; y < frameHeight; ++y)
-        {
-            const BYTE* yRow = yPlane + static_cast<std::size_t>(y) * frameStride;
-            const BYTE* uvRow = uvPlane + static_cast<std::size_t>(y / 2) * frameStride;
-            std::uint8_t* dst = convertedBuffer.data() + static_cast<std::size_t>(y) * outStride;
-
-            for (std::uint32_t x = 0; x < frameWidth; ++x)
-            {
-                const int Y = static_cast<int>(yRow[x]);
-                const int uvIndex = static_cast<int>((x / 2) * 2);
-                const int U = static_cast<int>(uvRow[uvIndex]);
-                const int V = static_cast<int>(uvRow[uvIndex + 1]);
-
-                const int c = Y - 16;
-                const int d = U - 128;
-                const int e = V - 128;
-                const int r = (298 * c + 409 * e + 128) >> 8;
-                const int g = (298 * c - 100 * d - 208 * e + 128) >> 8;
-                const int b = (298 * c + 516 * d + 128) >> 8;
-
-                const std::size_t dstOffset = static_cast<std::size_t>(x) * 4;
-                dst[dstOffset + 0] = clampByte(b);
-                dst[dstOffset + 1] = clampByte(g);
-                dst[dstOffset + 2] = clampByte(r);
-                dst[dstOffset + 3] = 255;
-            }
         }
     }
 
@@ -1087,23 +1056,17 @@ struct DirectShowCaptureImpl
         frame.contentBottom = contentBottom != 0 ? (contentBottom) : frameHeight;
         frame.nominalFrameRate100 = activeFrameRate100;
 
-        const std::uint32_t activeWidth = frame.contentRight > frame.contentLeft ? (frame.contentRight - frame.contentLeft) : frameWidth;
-        const std::uint32_t activeHeight = frame.contentBottom > frame.contentTop ? (frame.contentBottom - frame.contentTop) : frameHeight;
-
-        frame.width = activeWidth != 0 ? activeWidth : frameWidth;
-        frame.height = activeHeight != 0 ? activeHeight : frameHeight;
+        frame.width = frameWidth;
+        frame.height = frameHeight;
         frame.timestamp100ns = sampleTime >= 0.0 ? static_cast<std::uint64_t>(sampleTime * 10'000'000.0) : 0;
+        frame.pixelFormat = DirectShowCapture::PixelFormat::BGRA8;
 
         if (activeSubtype == ActiveSubtype::NV12)
         {
-            convertNv12ToBgra(buffer, static_cast<std::size_t>(bufferLen));
-            if (convertedBuffer.empty())
-            {
-                return S_OK;
-            }
-            frame.data = convertedBuffer.data();
-            frame.dataSize = convertedBuffer.size();
-            frame.stride = frameWidth * 4;
+            frame.data = buffer;
+            frame.dataSize = static_cast<std::size_t>(bufferLen);
+            frame.stride = frameStride != 0 ? frameStride : frameWidth;
+            frame.pixelFormat = DirectShowCapture::PixelFormat::NV12;
             frame.bottomUp = false;
         }
         else if (activeSubtype == ActiveSubtype::RGB24)
