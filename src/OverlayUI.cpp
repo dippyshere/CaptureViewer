@@ -490,40 +490,46 @@ void OverlayUI::drawMenuWindow(Application& app)
     ImGui::SetNextItemWidth(ImGui::GetWindowWidth() * 0.5f);
     if (ImGui::BeginCombo("Capture Resolution", resolutionLabel.c_str()))
     {
-        for (const auto& [width, height] : resolutionOptions)
+        if (resolutionOptions.empty())
         {
-            const std::string modeLabel = std::to_string(width) + "x" + std::to_string(height);
-            const bool selected = app.settings().videoPreferredWidth == width &&
-                                  app.settings().videoPreferredHeight == height;
-            if (ImGui::Selectable(modeLabel.c_str(), selected))
+			ImGui::TextDisabled("No resolutions detected for this device");
+        }
+        else {
+            for (const auto& [width, height] : resolutionOptions)
             {
-                app.setVideoResolution(width, height);
-
-                std::vector<std::uint32_t> ratesForResolution;
-                for (const auto& candidate : videoModes_)
+                const std::string modeLabel = std::to_string(width) + "x" + std::to_string(height);
+                const bool selected = app.settings().videoPreferredWidth == width &&
+                    app.settings().videoPreferredHeight == height;
+                if (ImGui::Selectable(modeLabel.c_str(), selected))
                 {
-                    if (candidate.width == width && candidate.height == height)
+                    app.setVideoResolution(width, height);
+
+                    std::vector<std::uint32_t> ratesForResolution;
+                    for (const auto& candidate : videoModes_)
                     {
-                        const std::uint32_t rate100 = static_cast<std::uint32_t>(std::llround(candidate.frameRate * 100.0));
-                        if (rate100 != 0 && std::find(ratesForResolution.begin(), ratesForResolution.end(), rate100) == ratesForResolution.end())
+                        if (candidate.width == width && candidate.height == height)
                         {
-                            ratesForResolution.push_back(rate100);
+                            const std::uint32_t rate100 = static_cast<std::uint32_t>(std::llround(candidate.frameRate * 100.0));
+                            if (rate100 != 0 && std::find(ratesForResolution.begin(), ratesForResolution.end(), rate100) == ratesForResolution.end())
+                            {
+                                ratesForResolution.push_back(rate100);
+                            }
                         }
                     }
-                }
-                if (!ratesForResolution.empty())
-                {
-                    std::sort(ratesForResolution.begin(), ratesForResolution.end());
-                    std::uint32_t preferred = ratesForResolution.front();
-                    if (std::find(ratesForResolution.begin(), ratesForResolution.end(), 6000) != ratesForResolution.end())
+                    if (!ratesForResolution.empty())
                     {
-                        preferred = 6000;
+                        std::sort(ratesForResolution.begin(), ratesForResolution.end());
+                        std::uint32_t preferred = ratesForResolution.front();
+                        if (std::find(ratesForResolution.begin(), ratesForResolution.end(), 6000) != ratesForResolution.end())
+                        {
+                            preferred = 6000;
+                        }
+                        else if (std::find(ratesForResolution.begin(), ratesForResolution.end(), app.settings().videoPreferredFrameRate100) != ratesForResolution.end())
+                        {
+                            preferred = app.settings().videoPreferredFrameRate100;
+                        }
+                        app.setVideoFrameRate100(preferred);
                     }
-                    else if (std::find(ratesForResolution.begin(), ratesForResolution.end(), app.settings().videoPreferredFrameRate100) != ratesForResolution.end())
-                    {
-                        preferred = app.settings().videoPreferredFrameRate100;
-                    }
-                    app.setVideoFrameRate100(preferred);
                 }
             }
         }
@@ -629,6 +635,11 @@ void OverlayUI::drawMenuWindow(Application& app)
                 app.setVideoFormatPreference(VideoFormatPreference::NV12);
             }
         }
+
+        if (!hasXrgb && !hasNv12)
+        {
+            ImGui::TextDisabled("No supported formats detected for this device");
+		}
 
         ImGui::EndCombo();
     }
@@ -743,6 +754,9 @@ void OverlayUI::drawMenuWindow(Application& app)
     }
 
     ImGui::Spacing();
+
+	ImGui::SetCursorPosX(ImGui::GetWindowWidth() - ImGui::CalcTextSize("v1.0.5  ").x);
+	ImGui::TextDisabled("v1.0.5");
 
     if (ImGui::IsKeyReleased(ImGuiKey_Escape))
     {
